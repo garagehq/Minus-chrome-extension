@@ -1,0 +1,20 @@
+import { chromium } from "playwright";
+import { createServer } from "http";
+import { rmSync } from "fs";
+const FLAGS = ["--no-sandbox","--enable-unsafe-webgpu","--ignore-gpu-blocklist","--use-angle=vulkan","--enable-features=Vulkan","--disable-vulkan-surface","--disable-gpu-shader-disk-cache"];
+const server = createServer((req,res)=>{res.setHeader("Content-Type","text/html");res.end("<html><body>hi</body></html>");});
+await new Promise(r=>server.listen(8921,r));
+const PROBE = async () => {
+  const a = await navigator.gpu?.requestAdapter();
+  return a ? (a.info?.vendor || "?") : "null";
+};
+rmSync("/home/ubuntu/.cache/minus-origin-test", { recursive: true, force: true });
+const ctx = await chromium.launchPersistentContext("/home/ubuntu/.cache/minus-origin-test", { channel:"chromium", headless:true, args:FLAGS });
+const page = await ctx.newPage();
+await page.goto("http://127.0.0.1:8921/");
+console.log("localhost origin:", await page.evaluate(PROBE));
+await page.goto("https://example.com");
+console.log("example.com     :", await page.evaluate(PROBE));
+await page.goto("http://127.0.0.1:8921/");
+console.log("localhost again :", await page.evaluate(PROBE));
+await ctx.close(); server.close();

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Minus fixture — static images</title>
+  <style>
+    body { font-family: sans-serif; max-width: 1100px; margin: 24px auto; }
+    .row { display: flex; gap: 24px; margin: 24px 0; }
+    figure { margin: 0; }
+    img { width: 480px; height: 270px; object-fit: cover; display: block; }
+    p.filler { line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <h1>Article about nothing in particular</h1>
+  <p class="filler">This is a plain article page used by the Minus test suite.
+  It contains one real advertisement capture and one regular content image of
+  the same size, plus normal text around them.</p>
+
+  <div class="row">
+    <figure>
+      <img id="ad-img" src="ad1.png" alt="">
+      <figcaption>banner slot</figcaption>
+    </figure>
+    <figure>
+      <img id="content-img" src="nonad1.png" alt="">
+      <figcaption>article photo</figcaption>
+    </figure>
+  </div>
+
+  <p class="filler">More filler text so the page looks like an ordinary
+  article. The extension should cover exactly one of the two images above —
+  the advertisement — with a Spanish flashcard overlay, and leave the content
+  image alone.</p>
+</body>
+</html>

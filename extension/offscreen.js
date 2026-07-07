@@ -10,9 +10,6 @@
 import { AutoModelForImageTextToText, AutoProcessor, RawImage, env } from "./dist/engine-lib.js";
 
 env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL("dist/");
-// some drivers (e.g. NVIDIA Tegra Vulkan) return null for high-performance
-// adapter requests; low-power resolves to the same (only) GPU
-if (env.backends.onnx.webgpu) env.backends.onnx.webgpu.powerPreference = "low-power";
 
 const PROMPT = "Is this an advertisement? Answer Yes or No.";
 const HUB_MODEL = "onnx-community/LFM2.5-VL-450M-ONNX";
@@ -31,17 +28,34 @@ async function localModelAvailable() {
   }
 }
 
+// The first requestAdapter() of a session can fail while the browser's GPU
+// service spins up (seen on NVIDIA Tegra; harmless elsewhere). Warm it up so
+// ORT's own single attempt doesn't land on the flake and dump us to WASM.
+async function warmUpWebGpu(tries = 6, delayMs = 1500) {
+  if (!navigator.gpu) return false;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const adapter = await navigator.gpu.requestAdapter();
+      if (adapter) return true;
+    } catch {}
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return false;
+}
+
 async function loadEngine() {
   const useLocal = await localModelAvailable();
   let modelId = HUB_MODEL;
   if (useLocal) {
+    env.allowLocalModels = true; // browser builds default this to false
     env.allowRemoteModels = false;
     env.localModelPath = chrome.runtime.getURL("models/");
     modelId = LOCAL_MODEL;
   }
 
-  const dtype = { vision_encoder: "q8", embed_tokens: "fp32", decoder_model_merged: "q4" };
-  let device = "webgpu";
+  // Validated combo (parity vs PyTorch: ad 0.999 / non-ad 0.031): 431MB total.
+  const dtype = { vision_encoder: "q8", embed_tokens: "q8", decoder_model_merged: "q4" };
+  let device = (await warmUpWebGpu()) ? "webgpu" : "wasm";
   engineInfo = { state: "loading", modelId, device };
 
   const processor = await AutoProcessor.from_pretrained(modelId);
