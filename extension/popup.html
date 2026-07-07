@@ -2,14 +2,17 @@
 <html>
 <head>
   <style>
-    body { width: 240px; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    body { width: 260px; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
            background: #101418; color: #f2f5f7; margin: 0; padding: 14px; }
     h1 { font-size: 15px; margin: 0 0 10px; color: #5ad1a5; letter-spacing: 0.08em; }
     label { display: block; font-size: 12px; margin: 10px 0 3px; opacity: 0.8; }
     input[type="text"] { width: 100%; box-sizing: border-box; background: #1c2530;
            border: 1px solid #2c3945; color: #f2f5f7; border-radius: 4px; padding: 5px; }
     .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-    #status { font-size: 11px; margin-top: 10px; opacity: 0.6; }
+    #status { font-size: 11px; margin-top: 12px; opacity: 0.75; min-height: 14px; }
+    #bar { display: none; height: 6px; background: #1c2530; border-radius: 3px;
+           margin-top: 6px; overflow: hidden; }
+    #bar > div { height: 100%; width: 0; background: #5ad1a5; transition: width .3s; }
   </style>
 </head>
 <body>
@@ -18,11 +21,10 @@
     <input type="checkbox" id="enabled">
     <label for="enabled" style="margin:0">Block ads</label>
   </div>
-  <label for="serverUrl">Inference server</label>
-  <input type="text" id="serverUrl">
   <label for="threshold">Ad threshold (0–1)</label>
   <input type="text" id="threshold">
   <div id="status"></div>
+  <div id="bar"><div></div></div>
   <script src="popup.js"></script>
 </body>
 </html>

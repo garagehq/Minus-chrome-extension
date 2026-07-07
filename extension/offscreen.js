@@ -58,14 +58,25 @@ async function loadEngine() {
   let device = (await warmUpWebGpu()) ? "webgpu" : "wasm";
   engineInfo = { state: "loading", modelId, device };
 
-  const processor = await AutoProcessor.from_pretrained(modelId);
+  // aggregate download/load progress for the popup (file -> fraction)
+  const progressByFile = {};
+  const progress_callback = (p) => {
+    if (p.status === "progress" && p.total) {
+      progressByFile[p.file] = { loaded: p.loaded, total: p.total };
+      let loaded = 0, total = 0;
+      for (const f of Object.values(progressByFile)) { loaded += f.loaded; total += f.total; }
+      engineInfo = { ...engineInfo, state: "loading", progress: total ? loaded / total : 0 };
+    }
+  };
+
+  const processor = await AutoProcessor.from_pretrained(modelId, { progress_callback });
   let model;
   try {
-    model = await AutoModelForImageTextToText.from_pretrained(modelId, { device, dtype });
+    model = await AutoModelForImageTextToText.from_pretrained(modelId, { device, dtype, progress_callback });
   } catch (e) {
     console.warn("[minus] WebGPU load failed, falling back to WASM:", e);
     device = "wasm";
-    model = await AutoModelForImageTextToText.from_pretrained(modelId, { device, dtype });
+    model = await AutoModelForImageTextToText.from_pretrained(modelId, { device, dtype, progress_callback });
   }
 
   const tok = processor.tokenizer;
@@ -74,8 +85,26 @@ async function loadEngine() {
   const yesIds = ids(["Yes", "yes", " Yes", " yes"]);
   const noIds = ids(["No", "no", " No", " no"]);
 
+  const engine = { model, processor, yesIds, noIds };
+
+  // Warm-up inference on a dummy image: shader compilation / first-run JIT
+  // lands here instead of on the first real page scan.
+  try {
+    const canvas = new OffscreenCanvas(64, 64);
+    canvas.getContext("2d").fillRect(0, 0, 64, 64);
+    const blob = await canvas.convertToBlob({ type: "image/png" });
+    const url = await new Promise((r) => {
+      const fr = new FileReader();
+      fr.onload = () => r(fr.result);
+      fr.readAsDataURL(blob);
+    });
+    await classifyOne(engine, url);
+  } catch (e) {
+    console.warn("[minus] warm-up inference failed (continuing):", e);
+  }
+
   engineInfo = { state: "ready", modelId, device };
-  return { model, processor, yesIds, noIds };
+  return engine;
 }
 
 function getEngine() {
@@ -132,8 +161,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           try {
             results.push(await classifyOne(engine, img));
           } catch (e) {
-            console.warn("[minus] classify error:", e);
-            results.push({ p_ad: 0, ms: 0, error: String(e) });
+            console.warn("[minus] classify error, retrying once:", e);
+            try {
+              results.push(await classifyOne(engine, img));
+            } catch (e2) {
+              results.push({ p_ad: 0, ms: 0, error: String(e2) });
+            }
           }
         }
         sendResponse({ ok: true, results, engine: engineInfo });

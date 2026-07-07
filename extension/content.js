@@ -98,13 +98,17 @@
       if (!crops.length) return;
 
       const results = await classifyBatch(crops);
-      if (!results) return;
+      if (!results) { scheduleScan(5000); return; } // engine hiccup: try again
+      let hadError = false;
       results.forEach((r, i) => {
         const { el, sig } = kept[i];
+        // transient engine errors must NOT become cached "not an ad" verdicts
+        if (r.error) { hadError = true; return; }
         verdictCache.set(sig, r.is_ad);
         if (verdictCache.size > 500) verdictCache.delete(verdictCache.keys().next().value);
         if (r.is_ad) block(el, r.p_ad);
       });
+      if (hadError) scheduleScan(5000);
     } finally {
       scanning = false;
     }
@@ -242,6 +246,7 @@
     if (!results) return;
 
     results.forEach((r, i) => {
+      if (r.error) return; // transient errors are not votes
       const v = kept[i];
       const st = videoState.get(v) || { adVotes: 0, nonAdVotes: 0, blocked: false };
       if (r.is_ad) { st.adVotes++; st.nonAdVotes = 0; } else { st.nonAdVotes++; st.adVotes = 0; }

@@ -21,6 +21,7 @@ try {
   console.log("engine:", JSON.stringify(engine));
 
   const page = await ctx.newPage();
+  page.on("console", (m) => { if (m.text().includes("minus")) console.log("[page]", m.text().slice(0, 200)); });
   await page.goto("http://127.0.0.1:8919/", { waitUntil: "load" });
 
   // overlay over the ad image
