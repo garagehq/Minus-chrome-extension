@@ -16,7 +16,9 @@
   const AD_HINT = /(^|[-_\b])(ad|ads|advert|advertisement|adsense|sponsor|sponsored|promo|banner|dbl|doubleclick|taboola|outbrain)([-_\b]|$)/i;
 
   let enabled = true;
+  let collectOptIn = false;                // anonymous snapshot contribution
   const allowed = new WeakSet();           // user clicked X
+  const sampleKeys = new WeakMap();        // element -> queued sample key (for retraction)
   const verdictCache = new Map();          // signature -> is_ad
   const overlays = new Map();              // element -> overlay div
   const videoState = new WeakMap();        // video -> {adVotes, nonAdVotes, blocked}
@@ -24,9 +26,33 @@
   let scanning = false;
 
   chrome.runtime.sendMessage({ type: "minus:settings" }, (resp) => {
-    if (resp?.ok) enabled = resp.settings.enabled;
+    if (resp?.ok) {
+      enabled = resp.settings.enabled;
+      collectOptIn = !!resp.settings.collectOptIn;
+    }
     if (enabled) start();
   });
+
+  // Opt-in only: queue a blocked element's crop for contribution. The
+  // background holds it for a 10-minute cool-down; clicking X retracts it.
+  function maybeQueueSample(el, crop, r) {
+    if (!collectOptIn || !crop) return;
+    const key = `${location.hostname}|${Date.now()}|${Math.random().toString(36).slice(2, 8)}`;
+    sampleKeys.set(el, key);
+    chrome.runtime.sendMessage({
+      type: "minus:queue-sample",
+      sample: {
+        key,
+        img: crop,                        // element crop only, never the full page
+        p_ad: r.p_ad,
+        verdict: r.is_ad ? "ad" : "non_ad",
+        host: location.hostname,          // hostname only, never the full URL
+        w: Math.round(el.getBoundingClientRect().width),
+        h: Math.round(el.getBoundingClientRect().height),
+        engine: r.engineId || "lfm-iter14",
+      },
+    });
+  }
 
   function start() {
     scheduleScan(200);
@@ -106,7 +132,10 @@
         if (r.error) { hadError = true; return; }
         verdictCache.set(sig, r.is_ad);
         if (verdictCache.size > 500) verdictCache.delete(verdictCache.keys().next().value);
-        if (r.is_ad) block(el, r.p_ad);
+        if (r.is_ad) {
+          block(el, r.p_ad);
+          maybeQueueSample(el, crops[i], r);
+        }
       });
       if (hadError) scheduleScan(5000);
     } finally {
@@ -167,6 +196,9 @@
       allowed.add(el);
       div.remove();
       overlays.delete(el);
+      // user said "show it" -> retract any queued contribution for this element
+      const key = sampleKeys.get(el);
+      if (key) chrome.runtime.sendMessage({ type: "minus:retract-sample", key });
     });
     document.documentElement.appendChild(div);
     overlays.set(el, div);

@@ -28,6 +28,9 @@ function scrubGpuCaches() {
   for (const d of [
     "Default/GPUCache", "GrShaderCache", "GraphiteDawnCache", "DawnGraphiteCache",
     "DawnWebGPUCache", "Default/DawnGraphiteCache", "Default/DawnWebGPUCache",
+    // Chrome caches the extension's MV3 service worker script here and will
+    // happily run a STALE background.js after we edit it — always refetch.
+    "Default/Service Worker",
   ]) {
     rmSync(join(PROFILE, d), { recursive: true, force: true });
   }
