@@ -1,0 +1,144 @@
+// Multi-site sweep: fixture pages carry HARD assertions; live sites are
+// OBSERVATIONAL (ad delivery in headless is nondeterministic) but still
+// hard-fail on page breakage or false positives where a page has no ads.
+//
+// Run: node tests/test_sites.mjs            (all)
+//      node tests/test_sites.mjs fixtures   (fixtures only)
+//      node tests/test_sites.mjs live       (live sites only)
+import { launchWithExtension, serveFixtures, waitForEngine, HERE } from "./harness.mjs";
+import { mkdirSync } from "fs";
+import { join } from "path";
+
+const MODE = process.argv[2] || "all";
+const SHOTS = join(HERE, "screenshots");
+mkdirSync(SHOTS, { recursive: true });
+
+const FIXTURES = [
+  {
+    name: "dynamic-insert",
+    url: "http://127.0.0.1:8919/dynamic.html",
+    run: async (page, t) => {
+      await page.waitForTimeout(2000);
+      t.assert("no overlay before insert", (await page.locator("[data-minus-overlay]").count()) === 0);
+      await page.locator("[data-minus-overlay]").first().waitFor({ state: "visible", timeout: 60000 });
+      const [ad, ov] = await Promise.all([
+        page.locator("#late-ad").boundingBox(),
+        page.locator("[data-minus-overlay]").first().boundingBox(),
+      ]);
+      t.assert("overlay covers late-inserted ad", ad && ov && Math.abs(ad.x - ov.x) < 8 && Math.abs(ad.y - ov.y) < 8);
+    },
+  },
+  {
+    name: "scroll-in",
+    url: "http://127.0.0.1:8919/scroll.html",
+    run: async (page, t) => {
+      await page.waitForTimeout(6000);
+      t.assert("below-fold ad not classified while offscreen",
+        (await page.locator("[data-minus-overlay]").count()) === 0);
+      await page.locator("#fold-ad").scrollIntoViewIfNeeded();
+      await page.locator("[data-minus-overlay]").first().waitFor({ state: "visible", timeout: 60000 });
+      await page.waitForTimeout(6000);
+      t.assert("exactly the ad overlaid after scroll (content stays clean)",
+        (await page.locator("[data-minus-overlay]").count()) === 1);
+    },
+  },
+  {
+    name: "iframe-ad",
+    url: "http://127.0.0.1:8919/adframe.html",
+    run: async (page, t) => {
+      await page.locator("[data-minus-overlay]").first().waitFor({ state: "visible", timeout: 60000 });
+      const [fr, ov] = await Promise.all([
+        page.locator("#ad-frame").boundingBox(),
+        page.locator("[data-minus-overlay]").first().boundingBox(),
+      ]);
+      t.assert("overlay covers the ad iframe", fr && ov && Math.abs(fr.x - ov.x) < 8 && Math.abs(fr.y - ov.y) < 8);
+    },
+  },
+];
+
+const LIVE = [
+  { name: "example.com", url: "https://example.com", maxOverlays: 0, hardFp: true },
+  { name: "wikipedia", url: "https://en.wikipedia.org/wiki/Advertising", maxOverlays: 1, hardFp: true },
+  { name: "youtube-home", url: "https://www.youtube.com", observational: true },
+  { name: "youtube-video", url: "https://www.youtube.com/watch?v=jNQXAC9IVRw", observational: true, dwellMs: 30000 },
+  { name: "apnews", url: "https://apnews.com", observational: true },
+  { name: "bbc", url: "https://www.bbc.com", observational: true },
+  { name: "old-reddit", url: "https://old.reddit.com/r/all", observational: true },
+];
+
+const server = await serveFixtures();
+const ctx = await launchWithExtension();
+
+let failures = 0;
+const results = [];
+
+function mkT(name) {
+  return {
+    assert(what, cond) {
+      console.log(`  ${cond ? "PASS" : "FAIL"}  ${what}`);
+      if (!cond) failures++;
+    },
+  };
+}
+
+try {
+  await waitForEngine(ctx);
+
+  if (MODE !== "live") {
+    for (const f of FIXTURES) {
+      console.log(`\n=== fixture: ${f.name}`);
+      const page = await ctx.newPage();
+      try {
+        await page.goto(f.url, { waitUntil: "load", timeout: 30000 });
+        await f.run(page, mkT(f.name));
+        await page.screenshot({ path: join(SHOTS, `site_${f.name}.png`) });
+      } catch (e) {
+        console.log(`  FAIL  (exception) ${String(e).split("\n")[0]}`);
+        failures++;
+      } finally {
+        await page.close();
+      }
+    }
+  }
+
+  if (MODE !== "fixtures") {
+    for (const s of LIVE) {
+      console.log(`\n=== live: ${s.name}`);
+      const page = await ctx.newPage();
+      const pageErrors = [];
+      page.on("pageerror", (e) => {
+        if (String(e).includes("minus") || String(e).includes("chrome-extension")) pageErrors.push(String(e));
+      });
+      try {
+        // generous timeout: ad networks are slow
+        await page.goto(s.url, { waitUntil: "domcontentloaded", timeout: 45000 });
+        await page.waitForTimeout(s.dwellMs || 15000);
+        const overlays = await page.locator("[data-minus-overlay]").count();
+        const covered = await page.evaluate(() =>
+          [...document.querySelectorAll("[data-minus-overlay]")].map((d) => {
+            const r = d.getBoundingClientRect();
+            return `${Math.round(r.width)}x${Math.round(r.height)}@${Math.round(r.x)},${Math.round(r.y)}`;
+          }));
+        await page.screenshot({ path: join(SHOTS, `site_${s.name}.png`) });
+        const t = mkT(s.name);
+        t.assert("no extension-caused page errors", pageErrors.length === 0);
+        if (s.hardFp) t.assert(`overlays <= ${s.maxOverlays} (FP check)`, overlays <= s.maxOverlays);
+        console.log(`  overlays: ${overlays}${covered.length ? "  " + covered.join(" ") : ""}${s.observational ? "  (observational)" : ""}`);
+        results.push({ site: s.name, overlays, covered });
+      } catch (e) {
+        console.log(`  SKIP  (nav/timeout) ${String(e).split("\n")[0]}`);
+        results.push({ site: s.name, error: String(e).split("\n")[0] });
+      } finally {
+        await page.close();
+      }
+    }
+  }
+} finally {
+  await ctx.close();
+  server.close();
+}
+
+console.log("\n=== summary");
+for (const r of results) console.log(" ", JSON.stringify(r));
+console.log(failures ? `\n${failures} failure(s)` : "\nall green");
+process.exit(failures ? 1 : 0);

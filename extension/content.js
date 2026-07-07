@@ -189,6 +189,24 @@
   }
 
   // ---------------------------------------------------------------- video
+  // Prefer reading frames straight off the <video> element: it ignores our
+  // own overlay (avoids the "flashcard looks like an ad slate" deadlock) and
+  // works for same-origin + MSE playback (YouTube et al). Falls back to a
+  // tab-screenshot crop for tainted canvases, hiding the overlay for a beat.
+  function frameFromVideo(v) {
+    try {
+      if (!v.videoWidth) return null;
+      const canvas = document.createElement("canvas");
+      const scale = Math.min(1, 960 / v.videoWidth);
+      canvas.width = Math.round(v.videoWidth * scale);
+      canvas.height = Math.round(v.videoHeight * scale);
+      canvas.getContext("2d").drawImage(v, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/png"); // throws if tainted
+    } catch {
+      return null;
+    }
+  }
+
   async function sampleVideos() {
     if (!enabled || document.hidden) return;
     const videos = [...document.querySelectorAll("video")].filter((v) => {
@@ -197,13 +215,28 @@
     });
     if (!videos.length) return;
 
-    const shot = await capture();
-    if (!shot) return;
-    const crops = [], kept = [];
+    const crops = [], kept = [], needShot = [];
     for (const v of videos) {
-      const crop = cropFromShot(shot, v.getBoundingClientRect());
-      if (crop) { crops.push(crop); kept.push(v); }
+      const direct = frameFromVideo(v);
+      if (direct) { crops.push(direct); kept.push(v); }
+      else needShot.push(v);
     }
+
+    if (needShot.length) {
+      // tainted canvas fallback: hide overlays so the screenshot sees the video
+      const hidden = needShot.map((v) => overlays.get(v)).filter(Boolean);
+      hidden.forEach((d) => (d.style.visibility = "hidden"));
+      if (hidden.length) await new Promise((r) => setTimeout(r, 90));
+      const shot = await capture();
+      hidden.forEach((d) => (d.style.visibility = ""));
+      if (shot) {
+        for (const v of needShot) {
+          const crop = cropFromShot(shot, v.getBoundingClientRect());
+          if (crop) { crops.push(crop); kept.push(v); }
+        }
+      }
+    }
+
     if (!crops.length) return;
     const results = await classifyBatch(crops);
     if (!results) return;
