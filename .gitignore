@@ -1,0 +1,7 @@
+node_modules/
+extension/dist/
+extension/models/
+*.log
+.cache/
+test-results/
+tests/screenshots/

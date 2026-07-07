@@ -1,0 +1,30 @@
+{
+  "name": "minus-chrome-extension",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/garagehq/Minus-chrome-extension.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/garagehq/Minus-chrome-extension/issues"
+  },
+  "homepage": "https://github.com/garagehq/Minus-chrome-extension#readme",
+  "type": "module",
+  "private": "true",
+  "devDependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "esbuild": "^0.28.1",
+    "playwright": "^1.61.1"
+  }
+}
