@@ -4,6 +4,7 @@
 //
 // Run: node tests/test_sites.mjs            (all)
 //      node tests/test_sites.mjs fixtures   (fixtures only)
+//      node tests/test_sites.mjs fp         (FP audit on image-heavy no-ad pages)
 //      node tests/test_sites.mjs live       (live sites only)
 import { launchWithExtension, serveFixtures, waitForEngine, HERE } from "./harness.mjs";
 import { mkdirSync } from "fs";
@@ -66,6 +67,17 @@ const LIVE = [
   { name: "old-reddit", url: "https://old.reddit.com/r/all", observational: true },
 ];
 
+// FP-audit set: image-heavy pages that contain NO ads (or almost none) —
+// every overlay here is a false positive covering real content.
+const FP_AUDIT = [
+  { name: "fp-wiki-gallery", url: "https://en.wikipedia.org/wiki/Impressionism", maxOverlays: 0, hardFp: true, dwellMs: 20000 },
+  { name: "fp-wikimedia-potd", url: "https://commons.wikimedia.org/wiki/Main_Page", maxOverlays: 1, hardFp: true, dwellMs: 20000 },
+  { name: "fp-nasa-gallery", url: "https://www.nasa.gov/image-of-the-day/", maxOverlays: 1, hardFp: true, dwellMs: 20000 },
+  { name: "fp-mdn", url: "https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API", maxOverlays: 0, hardFp: true },
+  { name: "fp-openlibrary", url: "https://openlibrary.org/subjects/science_fiction", maxOverlays: 1, hardFp: true, dwellMs: 20000 },
+  { name: "fp-books-toscrape", url: "https://books.toscrape.com/", maxOverlays: 1, hardFp: true, dwellMs: 20000 },
+];
+
 const server = await serveFixtures();
 const ctx = await launchWithExtension();
 
@@ -102,7 +114,8 @@ try {
   }
 
   if (MODE !== "fixtures") {
-    for (const s of LIVE) {
+    const liveSet = MODE === "fp" ? FP_AUDIT : MODE === "live" ? LIVE : [...LIVE, ...FP_AUDIT];
+    for (const s of liveSet) {
       console.log(`\n=== live: ${s.name}`);
       const page = await ctx.newPage();
       const pageErrors = [];
