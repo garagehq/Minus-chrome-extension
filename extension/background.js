@@ -8,9 +8,13 @@ const DEFAULTS = {
   threshold: 0.5,
   enabled: true,
   engineKind: "lfm",
-  collectOptIn: false,               // anonymous ad-snapshot contribution
-  ingestUrl: "",                     // where opted-in samples are POSTed
-  ingestKey: "",                     // shared secret sent as x-minus-key
+  collectOptIn: false,               // anonymous ad-snapshot contribution (opt-in)
+  // Pre-wired ingest endpoint so opting in just works. Collection still requires
+  // collectOptIn=true (per-user, off by default), so nothing sends until a user
+  // turns it on. The key only gates the endpoint against random bots — it ships
+  // to every install by design, not a real secret.
+  ingestUrl: "https://minus-ingest-garage.fly.dev/ingest",
+  ingestKey: "bdc2d283edff8b961ddf5f235bd1ebeab6c4f98ca9a5e48a",
   disabledSites: [],                 // per-site kill switch (hostnames)
 };
 
