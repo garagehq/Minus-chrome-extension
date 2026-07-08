@@ -10,6 +10,7 @@ const DEFAULTS = {
   engineKind: "lfm",
   collectOptIn: false,               // anonymous ad-snapshot contribution
   ingestUrl: "",                     // where opted-in samples are POSTed
+  ingestKey: "",                     // shared secret sent as x-minus-key
   disabledSites: [],                 // per-site kill switch (hostnames)
 };
 
@@ -64,7 +65,7 @@ async function queuedSamples() {
 }
 
 async function uploadDueSamples() {
-  const { collectOptIn, ingestUrl } = await getSettings();
+  const { collectOptIn, ingestUrl, ingestKey } = await getSettings();
   if (!collectOptIn || !ingestUrl) return;
   const { uploadCooldownMs } = await chrome.storage.local.get({ uploadCooldownMs: DEFAULT_COOLDOWN_MS });
   const due = (await queuedSamples()).filter((s) => Date.now() - s.queuedAt > uploadCooldownMs);
@@ -73,7 +74,10 @@ async function uploadDueSamples() {
     try {
       const resp = await fetch(ingestUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(ingestKey ? { "x-minus-key": ingestKey } : {}),
+        },
         body: JSON.stringify({ v: 1, samples: batch }),
       });
       if (resp.ok) for (const s of batch) await retractSample(s.key);

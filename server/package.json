@@ -1,0 +1,15 @@
+{
+  "name": "minus-ingest-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ingest server for opted-in Minus ad snapshots -> private HF dataset.",
+  "license": "MIT",
+  "scripts": {
+    "start": "node ingest-server.mjs",
+    "dev": "node --env-file=.env ingest-server.mjs"
+  },
+  "dependencies": {
+    "@huggingface/hub": "^1.0.1"
+  }
+}

@@ -1,0 +1,35 @@
+# Fly.io config for the Minus ingest server.
+# See server/DEPLOY.md for the full walkthrough.
+app = "minus-ingest"          # change to your app name after `fly launch`
+primary_region = "sjc"        # pick one near you: fly platform regions
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8790"
+  MINUS_INGEST_DIR = "/data/captures"
+  BATCH_UPLOAD = "50"
+
+[http_service]
+  internal_port = 8790
+  force_https = true
+  auto_stop_machines = "suspend"   # scale to zero when idle
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+
+# Persist staged captures across restarts (HF is the source of truth, but this
+# lets an interrupted batch resume). Create with: fly volumes create minus_data
+[[mounts]]
+  source = "minus_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

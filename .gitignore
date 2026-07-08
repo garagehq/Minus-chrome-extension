@@ -5,3 +5,6 @@ extension/models/
 .cache/
 test-results/
 tests/screenshots/
+server/.env
+server/node_modules/
+server/captures/
