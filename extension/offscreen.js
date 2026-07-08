@@ -14,7 +14,7 @@ ort.env.wasm.wasmPaths = chrome.runtime.getURL("dist/");
 
 const PROMPT = "Is this an advertisement? Answer Yes or No.";
 const HUB_MODEL = "onnx-community/LFM2.5-VL-450M-ONNX";
-const LOCAL_MODEL = "lfm-iter14"; // extension/models/lfm-iter14 if packaged
+const LOCAL_MODEL = "lfm-iter20web"; // web-domain model (streaming 99.08% + web-ad clean-core 75%)
 
 let enginePromise = null;
 let engineInfo = { state: "cold" };
@@ -114,19 +114,46 @@ async function loadEngine() {
 // WebGPU-only (fp16 weights); preprocess = squash-resize to 384, (x/255-.5)/.5.
 const SIGLIP2_SIZE = 384;
 
+async function exists(url) {
+  return fetch(url, { method: "HEAD" }).then((r) => r.ok).catch(() => false);
+}
+
+// Backend chain for the SigLIP2 ONNX graph, in preference order. fp16 weights
+// run only on WebGPU; WebGL/WASM need the fp32 model (bigger — ship it only if
+// you intend to support non-WebGPU machines). WebGL EP op coverage is partial,
+// so it may fail to init on this graph — we try it and fall through.
 async function loadSiglip2Engine() {
   const base = chrome.runtime.getURL("models/siglip2/");
-  let modelUrl = `${base}model_fp16.onnx`;
-  if (!(await fetch(modelUrl, { method: "HEAD" }).then((r) => r.ok).catch(() => false))) {
-    modelUrl = `${base}model.onnx`; // fp32 fallback if packaged instead
+  const fp16 = `${base}model_fp16.onnx`;
+  const fp32 = `${base}model.onnx`;
+  const haveFp16 = await exists(fp16);
+  const haveFp32 = await exists(fp32);
+
+  // WebGL EP is only present when built against onnxruntime-web/all.
+  const hasWebgl = !!(ort.env?.webgl) || (ort.backends && "webgl" in ort.backends);
+  const plan = [];
+  if (haveFp16) plan.push({ ep: "webgpu", url: fp16, needWarmup: true });
+  if (haveFp32) plan.push({ ep: "webgpu", url: fp32, needWarmup: true });
+  if (haveFp32 && hasWebgl) plan.push({ ep: "webgl", url: fp32 });
+  if (haveFp32) plan.push({ ep: "wasm", url: fp32 });
+  if (!plan.length) throw new Error("no SigLIP2 model packaged");
+
+  let lastErr;
+  for (const step of plan) {
+    try {
+      if (step.needWarmup && !(await warmUpWebGpu())) continue; // no adapter, skip GPU steps
+      engineInfo = { state: "loading", modelId: "siglip2-so400m-384", device: step.ep };
+      const session = await ort.InferenceSession.create(step.url, {
+        executionProviders: [step.ep],
+      });
+      engineInfo = { state: "ready", modelId: "siglip2-so400m-384", device: step.ep };
+      return { kind: "siglip2", session };
+    } catch (e) {
+      console.warn(`[minus] SigLIP2 on ${step.ep} failed, trying next:`, e);
+      lastErr = e;
+    }
   }
-  await warmUpWebGpu();
-  engineInfo = { state: "loading", modelId: "siglip2-so400m-384", device: "webgpu" };
-  const session = await ort.InferenceSession.create(modelUrl, {
-    executionProviders: ["webgpu"],
-  });
-  engineInfo = { state: "ready", modelId: "siglip2-so400m-384", device: "webgpu" };
-  return { kind: "siglip2", session };
+  throw lastErr || new Error("SigLIP2: no working backend");
 }
 
 async function siglip2Classify(engine, dataUrl) {
@@ -150,10 +177,11 @@ async function siglip2Classify(engine, dataUrl) {
   return { p_ad: Number(out.p_ad.data[0]), ms: Math.round(performance.now() - t0) };
 }
 
-function getEngine() {
+// engineKind is passed IN from the background worker — offscreen documents
+// do not reliably expose chrome.storage across Chrome builds.
+function getEngine(engineKind = "lfm") {
   if (!enginePromise) {
     enginePromise = (async () => {
-      const { engineKind } = await chrome.storage.local.get({ engineKind: "lfm" });
       return engineKind === "siglip2" ? loadSiglip2Engine() : loadEngine();
     })().catch((e) => {
       enginePromise = null;
@@ -199,10 +227,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     try {
       if (msg.type === "engine-status") {
         // touch the engine so it starts warming up on first status call
-        getEngine().catch(() => {});
+        getEngine(msg.engineKind).catch(() => {});
         sendResponse({ ok: true, info: engineInfo });
       } else if (msg.type === "classify") {
-        const engine = await getEngine();
+        const engine = await getEngine(msg.engineKind);
         const results = [];
         for (const img of msg.images) {
           try {

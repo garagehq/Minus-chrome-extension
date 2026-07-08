@@ -7,6 +7,7 @@
 const DEFAULTS = {
   threshold: 0.5,
   enabled: true,
+  engineKind: "lfm",
   collectOptIn: false,               // anonymous ad-snapshot contribution
   ingestUrl: "",                     // where opted-in samples are POSTed
   disabledSites: [],                 // per-site kill switch (hostnames)
@@ -199,8 +200,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true, dataUrl });
       } else if (msg.type === "minus:classify") {
         await ensureOffscreen();
-        const { threshold } = await getSettings();
-        const resp = await askOffscreen({ type: "classify", images: msg.images });
+        const { threshold, engineKind } = await getSettings();
+        const resp = await askOffscreen({ type: "classify", images: msg.images, engineKind });
         if (!resp?.ok) throw new Error(resp?.error || "engine error");
         sendResponse({
           ok: true,
@@ -232,7 +233,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true });
       } else if (msg.type === "minus:engine-status") {
         await ensureOffscreen();
-        const resp = await askOffscreen({ type: "engine-status" });
+        const { engineKind } = await getSettings();
+        const resp = await askOffscreen({ type: "engine-status", engineKind });
         sendResponse(resp);
       } else {
         sendResponse({ ok: false, error: "unknown message" });
@@ -246,5 +248,5 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 // Warm the engine as soon as the browser starts the worker.
 ensureOffscreen()
-  .then(() => askOffscreen({ type: "engine-status" }))
+  .then(async () => askOffscreen({ type: "engine-status", engineKind: (await getSettings()).engineKind }))
   .catch(() => {});

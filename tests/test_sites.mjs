@@ -67,6 +67,25 @@ const LIVE = [
   { name: "old-reddit", url: "https://old.reddit.com/r/all", observational: true },
 ];
 
+// Compatibility matrix: diverse real-world architectures. Observational
+// (headless gets few real ads) but every one hard-fails on page breakage —
+// the point is "does the extension coexist without breaking these sites".
+const COMPAT = [
+  { name: "compat-google-serp", url: "https://www.google.com/search?q=car+insurance", observational: true },
+  { name: "compat-twitch", url: "https://www.twitch.tv/directory", observational: true, dwellMs: 20000 },
+  { name: "compat-cnn", url: "https://www.cnn.com", observational: true, dwellMs: 20000 },
+  { name: "compat-theverge", url: "https://www.theverge.com", observational: true, dwellMs: 20000 },
+  { name: "compat-forbes", url: "https://www.forbes.com", observational: true, dwellMs: 20000 },
+  { name: "compat-nytimes", url: "https://www.nytimes.com", observational: true, dwellMs: 20000 },
+  { name: "compat-amazon", url: "https://www.amazon.com/s?k=headphones", observational: true, dwellMs: 20000 },
+  { name: "compat-ebay", url: "https://www.ebay.com/b/Laptops/175672", observational: true, dwellMs: 20000 },
+  { name: "compat-spa-nav", url: "https://en.wikipedia.org/wiki/Cat", observational: true,
+    after: async (page) => { // SPA-style in-page nav must not leak overlays
+      await page.click("a[href='/wiki/Dog']").catch(() => {});
+      await page.waitForTimeout(8000);
+    } },
+];
+
 // FP-audit set: image-heavy pages that contain NO ads (or almost none) —
 // every overlay here is a false positive covering real content.
 const FP_AUDIT = [
