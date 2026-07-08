@@ -37,9 +37,35 @@ divs / video)         per element)             Yes/No at first gen position
 | `lfm` (default) | LFM2.5-VL-450M Iter 14 fine-tune, q4/q8 ONNX (431MB) | 99.08% | 28.6% → Iter 20-web training in progress | ~340ms |
 | `siglip2` | SigLIP2-SO400M-384 web fine-tune, fp16 ONNX (817MB) | 98.06% | 79.6% | ~25ms class |
 
-Switch in the popup. Both run 100% locally. WebGL fallback for
-non-WebGPU browsers is on the roadmap (SigLIP2 graph only — the LFM's
-fused ops need WebGPU/WASM).
+### Engines (switch in the popup — reloads on change)
+
+| Engine | Model | Streaming holdout | Web-ad clean-core | Size | Backends |
+|---|---|---|---|---|---|
+| **lfm** (default) | LFM2.5-VL-450M Iter 14, q4/q8 | **99.08%** | 28.6% | 431MB | WebGPU → WASM |
+| lfm-web | LFM2.5-VL-450M Iter 20-web, q4/q8 | 99.08% | 75.0% | 431MB | WebGPU → WASM |
+| siglip2 | SigLIP2-SO400M-384 web ft, fp16 | 98.06% | 79.6% | 817MB | WebGPU (→WebGL/WASM w/ fp32) |
+| lite | ViT-B-16-SigLIP2-384, fp16/fp32 | 95.3% | (weaker) | 178MB fp16 / 356MB fp32 | WebGPU → WASM |
+
+The **lfm** default is chosen for zero false-positives on web content
+("just works"). **lfm-web** catches ~2.6× more web-display ads but
+false-positives on product/book-cover imagery — offered for users who
+want aggressive web-ad blocking (an Iter 21 hard-negative retrain aims to
+make it FP-clean). **lite** is the low-end / no-WebGPU option: its fp32
+graph runs on WASM in ~1-3s/image (vs ~26s for the 450M VLM on WASM).
+
+Everything runs 100% locally — no server, no telemetry.
+
+### Backend support matrix
+
+| Backend | LFM engines | SigLIP2 / lite | Notes |
+|---|---|---|---|
+| **WebGPU** | ✅ (q4/q8) | ✅ (fp16) | primary path; Chrome 113+, Apple Silicon via Metal |
+| **WASM** | ✅ (slow: ~26s/img for LFM) | ✅ (fp32; ~1-3s for lite) | universal fallback, no GPU needed |
+| **WebGL** | ✗ (LFM fused ops unsupported) | ⚠️ build-gated | needs `onnxruntime-web/all` bundle + fp32 model; partial op coverage — the loader tries it and falls through to WASM |
+
+Apple Silicon Chrome ships WebGPU-on-Metal by default, so the WebGPU
+path covers it; WebGL mainly matters for older Chrome/Brave without
+WebGPU, where the **lite** engine on WASM is the more reliable choice.
 
 ## Privacy & opt-in data contribution
 

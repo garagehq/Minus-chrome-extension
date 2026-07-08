@@ -129,8 +129,12 @@ async function exists(url) {
 // run only on WebGPU; WebGL/WASM need the fp32 model (bigger — ship it only if
 // you intend to support non-WebGPU machines). WebGL EP op coverage is partial,
 // so it may fail to init on this graph — we try it and fall through.
-async function loadSiglip2Engine() {
-  const base = chrome.runtime.getURL("models/siglip2/");
+// SigLIP2-family engines (single ONNX graph, squash-384 preprocess):
+//   "siglip2" -> SO400M-384 web fine-tune (817MB, accurate)
+//   "lite"    -> ViT-B-16-384 (178MB fp16, for low-end / no-WebGPU machines)
+async function loadSiglip2Engine(engineKind = "siglip2") {
+  const dir = engineKind === "lite" ? "lite" : "siglip2";
+  const base = chrome.runtime.getURL(`models/${dir}/`);
   const fp16 = `${base}model_fp16.onnx`;
   const fp32 = `${base}model.onnx`;
   const haveFp16 = await exists(fp16);
@@ -149,11 +153,11 @@ async function loadSiglip2Engine() {
   for (const step of plan) {
     try {
       if (step.needWarmup && !(await warmUpWebGpu())) continue; // no adapter, skip GPU steps
-      engineInfo = { state: "loading", modelId: "siglip2-so400m-384", device: step.ep };
+      engineInfo = { state: "loading", modelId: engineKind === "lite" ? "siglip2-b16-384-lite" : "siglip2-so400m-384", device: step.ep };
       const session = await ort.InferenceSession.create(step.url, {
         executionProviders: [step.ep],
       });
-      engineInfo = { state: "ready", modelId: "siglip2-so400m-384", device: step.ep };
+      engineInfo = { state: "ready", modelId: engineKind === "lite" ? "siglip2-b16-384-lite" : "siglip2-so400m-384", device: step.ep };
       return { kind: "siglip2", session };
     } catch (e) {
       console.warn(`[minus] SigLIP2 on ${step.ep} failed, trying next:`, e);
@@ -186,12 +190,20 @@ async function siglip2Classify(engine, dataUrl) {
 
 // engineKind is passed IN from the background worker — offscreen documents
 // do not reliably expose chrome.storage across Chrome builds.
+let loadedEngineKind = null;
 function getEngine(engineKind = "lfm") {
+  // Reload when the user switches engines in the popup (or on first load).
+  if (enginePromise && loadedEngineKind !== engineKind) {
+    enginePromise = null;
+    engineInfo = { state: "cold" };
+  }
   if (!enginePromise) {
+    loadedEngineKind = engineKind;
     enginePromise = (async () => {
-      return engineKind === "siglip2" ? loadSiglip2Engine() : loadEngine(engineKind);
+      return (engineKind === "siglip2" || engineKind === "lite") ? loadSiglip2Engine(engineKind) : loadEngine(engineKind);
     })().catch((e) => {
       enginePromise = null;
+      loadedEngineKind = null;
       engineInfo = { state: "error", error: String(e) };
       throw e;
     });

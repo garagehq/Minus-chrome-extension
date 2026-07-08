@@ -123,8 +123,11 @@ export async function waitForEngine(ctx, timeoutMs = 15 * 60 * 1000) {
         // NB: a context never receives its own runtime message, so from the
         // service worker we must address the offscreen document directly.
         if (typeof ensureOffscreen === "function") await ensureOffscreen();
+        // match real usage: the background reads engineKind from storage and
+        // forwards it to the offscreen; do the same from the SW here.
+        const { engineKind = "lfm" } = await chrome.storage.local.get({ engineKind: "lfm" });
         const r = await new Promise((resolve) =>
-          chrome.runtime.sendMessage({ target: "minus-offscreen", type: "engine-status" }, resolve));
+          chrome.runtime.sendMessage({ target: "minus-offscreen", type: "engine-status", engineKind }, resolve));
         return r?.info || r || { state: "no-offscreen-response" };
       } catch (e) {
         return { state: "swerr", error: String(e) };
