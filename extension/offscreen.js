@@ -14,15 +14,21 @@ ort.env.wasm.wasmPaths = chrome.runtime.getURL("dist/");
 
 const PROMPT = "Is this an advertisement? Answer Yes or No.";
 const HUB_MODEL = "onnx-community/LFM2.5-VL-450M-ONNX";
-const LOCAL_MODEL = "lfm-iter20web"; // web-domain model (streaming 99.08% + web-ad clean-core 75%)
+// engineKind -> packaged model dir. Default "lfm" = Iter 14: zero false
+// positives on web content (the safe "just works" default). "lfm-web" =
+// Iter 20-web: catches ~2.6x more web-display ads but false-positives on
+// product/book-cover imagery (learned product+text = ad from banner data) —
+// selectable for users who want aggressive web-ad blocking. Falls back to the
+// HF hub model if the chosen dir isn't packaged.
+const LFM_MODELS = { lfm: "lfm-iter14", "lfm-web": "lfm-iter20web" };
+const DEFAULT_LFM = "lfm-iter14";
 
 let enginePromise = null;
 let engineInfo = { state: "cold" };
 
-async function localModelAvailable() {
+async function localModelAvailable(dir) {
   try {
-    const url = chrome.runtime.getURL(`models/${LOCAL_MODEL}/config.json`);
-    const r = await fetch(url);
+    const r = await fetch(chrome.runtime.getURL(`models/${dir}/config.json`));
     return r.ok;
   } catch {
     return false;
@@ -44,14 +50,15 @@ async function warmUpWebGpu(tries = 6, delayMs = 1500) {
   return false;
 }
 
-async function loadEngine() {
-  const useLocal = await localModelAvailable();
+async function loadEngine(engineKind = "lfm") {
+  const localDir = LFM_MODELS[engineKind] || DEFAULT_LFM;
+  const useLocal = await localModelAvailable(localDir);
   let modelId = HUB_MODEL;
   if (useLocal) {
     env.allowLocalModels = true; // browser builds default this to false
     env.allowRemoteModels = false;
     env.localModelPath = chrome.runtime.getURL("models/");
-    modelId = LOCAL_MODEL;
+    modelId = localDir;
   }
 
   // Validated combo (parity vs PyTorch: ad 0.999 / non-ad 0.031): 431MB total.
@@ -182,7 +189,7 @@ async function siglip2Classify(engine, dataUrl) {
 function getEngine(engineKind = "lfm") {
   if (!enginePromise) {
     enginePromise = (async () => {
-      return engineKind === "siglip2" ? loadSiglip2Engine() : loadEngine();
+      return engineKind === "siglip2" ? loadSiglip2Engine() : loadEngine(engineKind);
     })().catch((e) => {
       enginePromise = null;
       engineInfo = { state: "error", error: String(e) };
