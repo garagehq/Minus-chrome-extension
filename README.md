@@ -30,6 +30,24 @@ divs / video)         per element)             Yes/No at first gen position
 - Engines: **LFM2.5-VL-450M** (our Iter 14 fine-tune, 99.08% on the frozen
   holdout) and **SigLIP2-SO400M-384** (98.26%, single forward pass, faster).
 
+## Engines
+
+| Engine | Model | Streaming holdout | Web-ad clean-core recall | Warm latency (Tegra WebGPU) |
+|---|---|---|---|---|
+| `lfm` (default) | LFM2.5-VL-450M Iter 14 fine-tune, q4/q8 ONNX (431MB) | 99.08% | 28.6% → Iter 20-web training in progress | ~340ms |
+| `siglip2` | SigLIP2-SO400M-384 web fine-tune, fp16 ONNX (817MB) | 98.06% | 79.6% | ~25ms class |
+
+Switch in the popup. Both run 100% locally. WebGL fallback for
+non-WebGPU browsers is on the roadmap (SigLIP2 graph only — the LFM's
+fused ops need WebGPU/WASM).
+
+## Privacy & opt-in data contribution
+
+See [PRIVACY.md](PRIVACY.md). Default: nothing leaves your machine.
+Right-click the icon → "Contribute anonymous ad snapshots" to opt in
+(element crop + hostname only, 10-min local cool-down, clicking ✕ on an
+overlay retracts the sample before upload).
+
 ## Dev setup
 
 ```bash
