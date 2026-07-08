@@ -61,9 +61,14 @@ async function flush() {
   if (!pending.length) return;
   const batch = pending;
   pending = [];
+  // Collapse duplicate paths (samples.jsonl is re-pushed per sample) — keep the
+  // last version of each path; uploadFiles rejects conflicting duplicate paths.
+  const byPath = new Map();
+  for (const f of batch) byPath.set(f.path, f);
+  const files = [...byPath.values()];
   try {
-    await hfUpload(batch.map((f) => ({ path: f.path, content: new Blob([f.content]) })));
-    uploaded += batch.length;
+    await hfUpload(files.map((f) => ({ path: f.path, content: new Blob([f.content]) })));
+    uploaded += files.length;
   } catch (e) {
     console.error("hf upload failed, will retry:", e.message);
     pending = batch.concat(pending); // requeue

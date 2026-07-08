@@ -1,6 +1,6 @@
 # Fly.io config for the Minus ingest server.
 # See server/DEPLOY.md for the full walkthrough.
-app = "minus-ingest"          # change to your app name after `fly launch`
+app = "minus-ingest-garage"
 primary_region = "sjc"        # pick one near you: fly platform regions
 
 [build]
@@ -9,7 +9,7 @@ primary_region = "sjc"        # pick one near you: fly platform regions
 [env]
   PORT = "8790"
   MINUS_INGEST_DIR = "/data/captures"
-  BATCH_UPLOAD = "50"
+  BATCH_UPLOAD = "1"
 
 [http_service]
   internal_port = 8790
