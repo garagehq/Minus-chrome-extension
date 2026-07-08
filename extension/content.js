@@ -14,6 +14,33 @@
   const VIDEO_SAMPLE_MS = 2500;
   const VIDEO_HYSTERESIS = 2;              // consecutive verdicts to flip state
   const AD_HINT = /(^|[-_\b])(ad|ads|advert|advertisement|adsense|sponsor|sponsored|promo|banner|dbl|doubleclick|taboola|outbrain)([-_\b]|$)/i;
+  // Shape gates so we only ever crop a *single ad slot*, never a content
+  // column / hero / page section. Standard IAB units fit inside these; the
+  // failure mode was giant containers (e.g. 710×3555 article grids) whose
+  // viewport-clamped area slipped past MAX_VIEWPORT_FRACTION.
+  const MAX_AD_H = 650;                    // tallest common rectangle (300×600 sky, 336×280…)
+  const MAX_AD_ANY_H = 1300;              // beyond any standard unit (300×1050 portrait is the tallest)
+  const SKYSCRAPER_MAX_W = 340;            // tall units are always NARROW (120/160/300-wide)
+  // Cookie/consent/CMP furniture: never an ad, and it overlaps real content
+  // in screenshots (produced "article image + Agree button" crops).
+  const CONSENT_HINT = /(consent|cookie|gdpr|ccpa|onetrust|didomi|cookiebot|truste|usercentrics|quantcast|sourcepoint|sp[-_]?message|fc[-_]consent|\bcmp\b)/i;
+  // Confidence tiering: an <iframe>/ad-slot has structural ad signal, so trust
+  // the model at the normal bar. A bare <img>/<div> (editorial photos live
+  // here) needs high confidence — editorial-photo FPs cluster at 0.66–0.76
+  // while real ads sit at 0.90+.
+  const CTX_BLOCK_P = 0.60;                // element has ad context (iframe / ad-hint ancestor)
+  const BARE_BLOCK_P = 0.88;               // context-less element: require high confidence
+  // A context-less element (bare <img>/<div>) is only ever blocked if it is a
+  // near-standard IAB ad size. Editorial photos live at arbitrary sizes
+  // (307×205, 371×482, 460×307) and were the dominant FP even at p=1.0; real
+  // display ads without ad-markup are almost always a standard slot size.
+  const STD_AD_SIZES = [
+    [300, 250], [336, 280], [728, 90], [970, 250], [970, 90], [320, 50], [320, 100],
+    [300, 600], [160, 600], [120, 600], [300, 1050], [468, 60], [234, 60], [250, 250],
+    [200, 200], [300, 100], [250, 360], [980, 120], [930, 180], [750, 100], [480, 320],
+  ];
+  const STD_TOL = 0.14;                     // ±14% render tolerance
+  const MIN_CROP_STDDEV = 11;              // reject near-blank crops (whitespace/nav wrappers)
 
   let enabled = true;
   let collectOptIn = false;                // anonymous snapshot contribution
@@ -84,6 +111,47 @@
     return `${el.tagName}|${src}|${Math.round(rect.width)}x${Math.round(rect.height)}`;
   }
 
+  // True only for shapes a real ad slot can plausibly be. Rejects content
+  // columns, heroes, and full-page sections that the model happily calls "ad".
+  function adPlausibleShape(rect) {
+    const w = rect.width, h = rect.height;
+    if (h > MAX_AD_ANY_H) return false;                    // whole-column / page section
+    if (h > MAX_AD_H && w > SKYSCRAPER_MAX_W) return false; // tall AND wide = content block
+    if (w >= innerWidth * 0.99 && h > 320) return false;    // full-bleed & tall = hero/section
+    return true;
+  }
+
+  // Structural ad signal: an iframe, or an ad-hint token on the element or a
+  // near ancestor (word-bounded, so "shadow"/"header" don't count). Bare
+  // editorial imgs have none of this and must clear the higher bar.
+  function hasAdContext(el) {
+    if (el.tagName === "IFRAME") return true;
+    let n = el, depth = 0;
+    while (n && depth < 4) {
+      const hint = `${n.id || ""} ${typeof n.className === "string" ? n.className : ""}`;
+      if (AD_HINT.test(hint)) return true;
+      n = n.parentElement; depth++;
+    }
+    return false;
+  }
+
+  function isStandardAdSize(w, h) {
+    for (const [sw, sh] of STD_AD_SIZES) {
+      if (Math.abs(w - sw) <= sw * STD_TOL && Math.abs(h - sh) <= sh * STD_TOL) return true;
+    }
+    return false;
+  }
+
+  function isConsentUI(el) {
+    const s = `${el.id || ""} ${typeof el.className === "string" ? el.className : ""}`;
+    if (CONSENT_HINT.test(s)) return true;
+    try {
+      return !!el.closest(
+        '[id*="onetrust" i],[id*="sp_message" i],[id*="didomi" i],[class*="consent" i],' +
+        '[class*="cookie" i],[class*="cmp" i],[class*="didomi" i],[class*="gdpr" i]');
+    } catch { return false; }
+  }
+
   // document + every open shadow root (ad slots often live inside web
   // components; closed roots are invisible to everyone).
   function allRoots() {
@@ -108,8 +176,11 @@
     return out.filter((el) => {
       if (allowed.has(el) || overlays.has(el)) return false;
       if (el.closest?.("[data-minus-overlay]")) return false;
-      // skip nested candidates whose ancestor is already a candidate container
-      return isVisible(el, el.getBoundingClientRect());
+      if (isConsentUI(el)) return false;                  // cookie/CMP banners are not ads
+      const rect = el.getBoundingClientRect();
+      if (!isVisible(el, rect)) return false;
+      if (!adPlausibleShape(rect)) return false;          // single ad slot only, no content columns
+      return true;
     });
   }
 
@@ -125,7 +196,7 @@
       }).slice(0, 12); // cap batch per scan
       if (!els.length) return;
 
-      const shot = await capture();
+      const shot = await captureClean();
       if (!shot) return;
       const crops = [];
       const kept = [];
@@ -133,7 +204,7 @@
         const rect = el.getBoundingClientRect();
         if (!isVisible(el, rect)) continue;
         const crop = cropFromShot(shot, rect);
-        if (crop) { crops.push(crop); kept.push({ el, sig: signature(el, rect) }); }
+        if (crop) { crops.push(crop); kept.push({ el, sig: signature(el, rect), ctx: hasAdContext(el) }); }
       }
       if (!crops.length) return;
 
@@ -141,12 +212,22 @@
       if (!results) { scheduleScan(5000); return; } // engine hiccup: try again
       let hadError = false;
       results.forEach((r, i) => {
-        const { el, sig } = kept[i];
+        const { el, sig, ctx } = kept[i];
         // transient engine errors must NOT become cached "not an ad" verdicts
         if (r.error) { hadError = true; return; }
-        verdictCache.set(sig, r.is_ad);
+        // Tiered decision:
+        //  - ad-context (iframe / ad-hint slot): trust model at normal bar.
+        //  - bare + standard IAB size: likely a bare-<img> ad, high-confidence bar.
+        //  - bare + non-standard size: never (this is where editorial photos live,
+        //    and the model FPs on them confidently — shape is the only signal).
+        const rc = el.getBoundingClientRect();
+        let isAd;
+        if (ctx) isAd = r.p_ad >= CTX_BLOCK_P;
+        else if (isStandardAdSize(rc.width, rc.height)) isAd = r.p_ad >= BARE_BLOCK_P;
+        else isAd = false;
+        verdictCache.set(sig, isAd);
         if (verdictCache.size > 500) verdictCache.delete(verdictCache.keys().next().value);
-        if (r.is_ad) {
+        if (isAd) {
           block(el, r.p_ad);
           maybeQueueSample(el, crops[i], r);
         }
@@ -155,6 +236,17 @@
     } finally {
       scanning = false;
     }
+  }
+
+  // Screenshot with our own overlays hidden, so a crop can never bake in a
+  // prior "el anuncio" flashcard that visually overlaps the target region.
+  async function captureClean() {
+    const divs = [...overlays.values()].filter((d) => d.style.visibility !== "hidden");
+    divs.forEach((d) => (d.style.visibility = "hidden"));
+    if (divs.length) await new Promise((r) => setTimeout(r, 50));
+    const shot = await capture();
+    divs.forEach((d) => (d.style.visibility = ""));
+    return shot;
   }
 
   function capture() {
@@ -180,8 +272,30 @@
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(sw);
     canvas.height = Math.round(sh);
-    canvas.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    const ctx2d = canvas.getContext("2d");
+    ctx2d.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    // Reject near-blank crops (nav bars / whitespace wrappers / unfilled slots):
+    // a real ad creative has visual variance. Sample luminance stddev cheaply.
+    if (cropStddev(ctx2d, canvas.width, canvas.height) < MIN_CROP_STDDEV) return null;
     return canvas.toDataURL("image/png");
+  }
+
+  function cropStddev(ctx2d, w, h) {
+    try {
+      const step = Math.max(1, Math.floor(Math.min(w, h) / 40)); // subsample grid
+      const data = ctx2d.getImageData(0, 0, w, h).data;
+      let n = 0, sum = 0, sumSq = 0;
+      for (let y = 0; y < h; y += step) {
+        for (let x = 0; x < w; x += step) {
+          const i = (y * w + x) * 4;
+          const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          sum += lum; sumSq += lum * lum; n++;
+        }
+      }
+      if (!n) return 999;
+      const mean = sum / n;
+      return Math.sqrt(Math.max(0, sumSq / n - mean * mean));
+    } catch { return 999; } // tainted/edge: don't reject on error
   }
 
   function classifyBatch(images) {
