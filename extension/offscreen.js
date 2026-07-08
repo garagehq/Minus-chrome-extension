@@ -7,9 +7,10 @@
 // WASM fallback. Verdict = logit decode: softmax over Yes/No token logits at
 // the first generated position — the same decoder the training campaign used.
 
-import { AutoModelForImageTextToText, AutoProcessor, RawImage, env } from "./dist/engine-lib.js";
+import { AutoModelForImageTextToText, AutoProcessor, RawImage, env, ort } from "./dist/engine-lib.js";
 
 env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL("dist/");
+ort.env.wasm.wasmPaths = chrome.runtime.getURL("dist/");
 
 const PROMPT = "Is this an advertisement? Answer Yes or No.";
 const HUB_MODEL = "onnx-community/LFM2.5-VL-450M-ONNX";
@@ -107,9 +108,54 @@ async function loadEngine() {
   return engine;
 }
 
+// ---------------------------------------------------------------- SigLIP2
+// Alternate engine: our SigLIP2-SO400M-384 fine-tune as one self-contained
+// ONNX graph (pixel_values [b,3,384,384] pre-normalized -> p_ad [b]).
+// WebGPU-only (fp16 weights); preprocess = squash-resize to 384, (x/255-.5)/.5.
+const SIGLIP2_SIZE = 384;
+
+async function loadSiglip2Engine() {
+  const base = chrome.runtime.getURL("models/siglip2/");
+  let modelUrl = `${base}model_fp16.onnx`;
+  if (!(await fetch(modelUrl, { method: "HEAD" }).then((r) => r.ok).catch(() => false))) {
+    modelUrl = `${base}model.onnx`; // fp32 fallback if packaged instead
+  }
+  await warmUpWebGpu();
+  engineInfo = { state: "loading", modelId: "siglip2-so400m-384", device: "webgpu" };
+  const session = await ort.InferenceSession.create(modelUrl, {
+    executionProviders: ["webgpu"],
+  });
+  engineInfo = { state: "ready", modelId: "siglip2-so400m-384", device: "webgpu" };
+  return { kind: "siglip2", session };
+}
+
+async function siglip2Classify(engine, dataUrl) {
+  const img = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  const canvas = new OffscreenCanvas(SIGLIP2_SIZE, SIGLIP2_SIZE);
+  const ctx2d = canvas.getContext("2d");
+  ctx2d.imageSmoothingQuality = "high";
+  ctx2d.drawImage(img, 0, 0, SIGLIP2_SIZE, SIGLIP2_SIZE); // squash resize
+  const { data } = ctx2d.getImageData(0, 0, SIGLIP2_SIZE, SIGLIP2_SIZE);
+  const n = SIGLIP2_SIZE * SIGLIP2_SIZE;
+  const px = new Float32Array(3 * n);
+  for (let i = 0; i < n; i++) {
+    px[i] = (data[i * 4] / 255 - 0.5) / 0.5;
+    px[n + i] = (data[i * 4 + 1] / 255 - 0.5) / 0.5;
+    px[2 * n + i] = (data[i * 4 + 2] / 255 - 0.5) / 0.5;
+  }
+  const t0 = performance.now();
+  const out = await engine.session.run({
+    pixel_values: new ort.Tensor("float32", px, [1, 3, SIGLIP2_SIZE, SIGLIP2_SIZE]),
+  });
+  return { p_ad: Number(out.p_ad.data[0]), ms: Math.round(performance.now() - t0) };
+}
+
 function getEngine() {
   if (!enginePromise) {
-    enginePromise = loadEngine().catch((e) => {
+    enginePromise = (async () => {
+      const { engineKind } = await chrome.storage.local.get({ engineKind: "lfm" });
+      return engineKind === "siglip2" ? loadSiglip2Engine() : loadEngine();
+    })().catch((e) => {
       enginePromise = null;
       engineInfo = { state: "error", error: String(e) };
       throw e;
@@ -124,6 +170,7 @@ const PROMPT_TEXT =
   `<|startoftext|><|im_start|>user\n<image>${PROMPT}<|im_end|>\n<|im_start|>assistant\n`;
 
 async function classifyOne(engine, dataUrl) {
+  if (engine.kind === "siglip2") return siglip2Classify(engine, dataUrl);
   const { model, processor, yesIds, noIds } = engine;
   const image = await RawImage.fromURL(dataUrl);
   const inputs = await processor(image, PROMPT_TEXT, { add_special_tokens: false });

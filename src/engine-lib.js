@@ -10,3 +10,7 @@ export {
   Tensor,
   env,
 } from "@huggingface/transformers";
+
+// Raw ONNX Runtime for the SigLIP2 engine (single-graph classifier —
+// no transformers.js model class needed).
+export * as ort from "onnxruntime-web/webgpu";

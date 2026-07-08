@@ -1,4 +1,4 @@
-const DEFAULTS = { threshold: 0.5, enabled: true };
+const DEFAULTS = { threshold: 0.5, enabled: true, engineKind: "lfm" };
 
 function ask(msg) {
   return new Promise((resolve) => chrome.runtime.sendMessage(msg, resolve));
@@ -32,6 +32,7 @@ async function load() {
   const s = { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) };
   document.getElementById("enabled").checked = s.enabled;
   document.getElementById("threshold").value = s.threshold;
+  document.getElementById("engineKind").value = s.engineKind;
   refreshStatus();
   setInterval(refreshStatus, 1500);
 }
@@ -40,10 +41,11 @@ async function save() {
   await chrome.storage.local.set({
     enabled: document.getElementById("enabled").checked,
     threshold: Math.min(1, Math.max(0, parseFloat(document.getElementById("threshold").value) || DEFAULTS.threshold)),
+    engineKind: document.getElementById("engineKind").value,
   });
 }
 
-for (const id of ["enabled", "threshold"]) {
+for (const id of ["enabled", "threshold", "engineKind"]) {
   document.getElementById(id).addEventListener("change", save);
 }
 load();

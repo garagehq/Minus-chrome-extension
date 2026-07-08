@@ -84,12 +84,26 @@
     return `${el.tagName}|${src}|${Math.round(rect.width)}x${Math.round(rect.height)}`;
   }
 
+  // document + every open shadow root (ad slots often live inside web
+  // components; closed roots are invisible to everyone).
+  function allRoots() {
+    const roots = [document];
+    for (let i = 0; i < roots.length && roots.length < 200; i++) {
+      for (const el of roots[i].querySelectorAll("*")) {
+        if (el.shadowRoot) roots.push(el.shadowRoot);
+      }
+    }
+    return roots;
+  }
+
   function candidates() {
     const out = [];
-    for (const el of document.querySelectorAll("img, iframe")) out.push(el);
-    for (const el of document.querySelectorAll("div, section, aside, a")) {
-      const hint = `${el.id} ${el.className}`;
-      if (typeof hint === "string" && AD_HINT.test(hint)) out.push(el);
+    for (const root of allRoots()) {
+      for (const el of root.querySelectorAll("img, iframe")) out.push(el);
+      for (const el of root.querySelectorAll("div, section, aside, a")) {
+        const hint = `${el.id} ${el.className}`;
+        if (typeof hint === "string" && AD_HINT.test(hint)) out.push(el);
+      }
     }
     return out.filter((el) => {
       if (allowed.has(el) || overlays.has(el)) return false;

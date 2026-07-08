@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Minus fixture — shadow DOM ad</title>
+<style>body{font-family:sans-serif;max-width:1100px;margin:24px auto}</style>
+</head>
+<body>
+  <h1>Web-component page</h1>
+  <p>The ad below lives inside an open shadow root, like many embedded widgets.</p>
+  <div id="host"></div>
+  <script>
+    const root = document.getElementById("host").attachShadow({ mode: "open" });
+    root.innerHTML = `
+      <style>img{width:480px;height:270px;object-fit:cover;display:block}</style>
+      <img id="shadow-ad" src="ad1.png">`;
+  </script>
+</body>
+</html>
