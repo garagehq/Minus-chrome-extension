@@ -5,7 +5,7 @@ pushes them to your **private** Hugging Face dataset. The HF write token lives
 only here — never in the extension.
 
 ## What you provide
-1. A private HF dataset: `GarageCyril/minus-web-captures` (create it: huggingface.co → New → Dataset → Owner `garagehq`, **Private**).
+1. A private HF dataset: `GarageCyril/minus-web-captures` (create it: huggingface.co → New → Dataset → Owner `GarageCyril`, **Private**).
 2. A **fine-grained** HF token with **write access to just that dataset** (Settings → Access Tokens → Fine-grained → add the repo, check Write).
 3. A random ingest key: `openssl rand -hex 24`.
 
