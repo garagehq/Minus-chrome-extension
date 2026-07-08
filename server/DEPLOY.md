@@ -5,7 +5,7 @@ pushes them to your **private** Hugging Face dataset. The HF write token lives
 only here — never in the extension.
 
 ## What you provide
-1. A private HF dataset: `garagehq/minus-web-captures` (create it: huggingface.co → New → Dataset → Owner `garagehq`, **Private**).
+1. A private HF dataset: `GarageCyril/minus-web-captures` (create it: huggingface.co → New → Dataset → Owner `garagehq`, **Private**).
 2. A **fine-grained** HF token with **write access to just that dataset** (Settings → Access Tokens → Fine-grained → add the repo, check Write).
 3. A random ingest key: `openssl rand -hex 24`.
 
@@ -26,7 +26,7 @@ fly volumes create minus_data --region <your-region> --size 1
 
 # secrets (NOT committed) — this is the only place the token lives
 fly secrets set \
-  HF_DATASET=garagehq/minus-web-captures \
+  HF_DATASET=GarageCyril/minus-web-captures \
   HF_TOKEN=hf_your_write_token \
   INGEST_KEY=your_openssl_rand_hex
 
@@ -36,7 +36,7 @@ fly deploy
 ## Verify
 ```bash
 curl https://<your-app>.fly.dev/health
-# {"ok":true,"queued":0,"uploaded":0,"pending":0,"dataset":"garagehq/minus-web-captures","upload":true}
+# {"ok":true,"queued":0,"uploaded":0,"pending":0,"dataset":"GarageCyril/minus-web-captures","upload":true}
 ```
 `upload:true` means the HF token + dataset are wired. Send a test sample:
 ```bash
