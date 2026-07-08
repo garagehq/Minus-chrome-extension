@@ -93,7 +93,22 @@ export function serveFixtures(port = 8919) {
       res.end();
     }
   });
-  return new Promise((resolve) => server.listen(port, () => resolve(server)));
+  // Retry on EADDRINUSE: a prior test's server may still be releasing the
+  // port (or a crashed run left a lingering socket in TIME_WAIT).
+  return new Promise((resolve, reject) => {
+    let tries = 0;
+    const attempt = () => {
+      server.once("error", (e) => {
+        if (e.code === "EADDRINUSE" && ++tries < 20) {
+          setTimeout(attempt, 1500);
+        } else {
+          reject(e);
+        }
+      });
+      server.listen(port, () => resolve(server));
+    };
+    attempt();
+  });
 }
 
 // Wait until the extension's engine reports ready (first run downloads the
