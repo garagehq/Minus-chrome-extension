@@ -1,0 +1,18 @@
+{
+  "model_load_ms": 6410,
+  "device": "webgpu",
+  "model": "siglip2-b16-384-lite",
+  "classify_latency_ms": {
+    "wall": 16706,
+    "reported": 367
+  },
+  "soak": {
+    "pages_visited": 15,
+    "max_leaked_overlays_on_blank": 0,
+    "sw_heap_growth_mb": "n/a"
+  },
+  "verdict": {
+    "loads_in_reasonable_time": true,
+    "no_overlay_leak": true
+  }
+}

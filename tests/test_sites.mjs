@@ -133,7 +133,11 @@ try {
   }
 
   if (MODE !== "fixtures") {
-    const liveSet = MODE === "fp" ? FP_AUDIT : MODE === "live" ? LIVE : [...LIVE, ...FP_AUDIT];
+    const liveSet =
+      MODE === "fp" ? FP_AUDIT :
+      MODE === "live" ? LIVE :
+      MODE === "compat" ? COMPAT :
+      [...LIVE, ...FP_AUDIT, ...COMPAT];
     for (const s of liveSet) {
       console.log(`\n=== live: ${s.name}`);
       const page = await ctx.newPage();

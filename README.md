@@ -86,6 +86,34 @@ Until the fine-tuned ONNX export is packaged under `extension/models/`, the
 engine falls back to the stock `onnx-community/LFM2.5-VL-450M-ONNX` from the
 Hugging Face hub (pipeline-validation only — the fine-tune is the point).
 
+## Site compatibility matrix
+
+Playwright sweep with the default safe engine (LFM Iter 14) — **no page
+breakage on any site**. "Overlays" are what the extension covered (headless
+Chromium is served few real ads, so this is observational for true-positive
+rate, but breakage and false-positives are hard signals):
+
+| Site | Page OK | Overlays | Note |
+|---|---|---|---|
+| example.com | ✅ | 0 | no ads (correct) |
+| Wikipedia (Advertising article) | ✅ | 1 | historical ad image (correct) |
+| YouTube home / video | ✅ | 0 | — |
+| BBC | ✅ | 0 | — |
+| AP News | ✅ | 3 | real 970×250 ad units caught |
+| old.reddit | ✅ | 0 | — |
+| Google SERP | ✅ | 0 | — |
+| Twitch | ✅ | 1 | promoted card |
+| CNN / The Verge | ✅ | 0 | — |
+| **Forbes** | ✅ | 3 | real 1280×282 billboards caught |
+| **NYTimes** | ✅ | 4 | real 1280×270 leaderboards caught |
+| **Amazon** (product search) | ✅ | 0 | no FP on product listings ✔ |
+| eBay | ✅ | 1 | promoted listing |
+| SPA in-page nav | ✅ | 0 | no overlay leak |
+
+Highlights: coexists with every major site without breaking layout; catches
+real programmatic ad units (Forbes/NYT/AP billboards & leaderboards); and the
+safe default does **not** false-positive on Amazon product listings.
+
 ## Tests
 
 ```bash
