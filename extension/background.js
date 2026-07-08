@@ -25,6 +25,14 @@ async function getSettings() {
 // before anything leaves the machine.
 const DEFAULT_COOLDOWN_MS = 10 * 60 * 1000; // uploadCooldownMs in storage overrides (tests)
 const DB_NAME = "minus-samples";
+// Resilience caps so a dead/cancelled ingest server never bloats storage or
+// hammers a dead endpoint. Collection is best-effort and MUST never surface.
+const MAX_QUEUE = 400;                 // hard cap on queued samples
+const SAMPLE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // drop samples older than 7 days
+const UPLOAD_TIMEOUT_MS = 12 * 1000;   // give up on a hung server fast
+const MAX_BACKOFF_MS = 6 * 60 * 60 * 1000;     // cap backoff at 6h
+let uploadFailures = 0;                // consecutive failures -> exponential backoff
+let nextUploadAt = 0;                  // don't retry a dead server before this
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -36,13 +44,34 @@ function openDb() {
 }
 
 async function queueSample(sample) {
-  const db = await openDb();
-  await new Promise((res, rej) => {
-    const tx = db.transaction("queue", "readwrite");
-    tx.objectStore("queue").put({ ...sample, queuedAt: Date.now() });
-    tx.oncomplete = res;
-    tx.onerror = () => rej(tx.error);
-  });
+  try {
+    const db = await openDb();
+    await new Promise((res, rej) => {
+      const tx = db.transaction("queue", "readwrite");
+      tx.objectStore("queue").put({ ...sample, queuedAt: Date.now() });
+      tx.oncomplete = res;
+      tx.onerror = () => rej(tx.error);
+    });
+    await enforceQueueCap();
+  } catch {
+    /* collection is best-effort; never surface */
+  }
+}
+
+// Keep the queue bounded: drop expired + oldest-over-cap so a permanently
+// dead/cancelled ingest server can never grow storage without limit.
+async function enforceQueueCap() {
+  try {
+    const all = await queuedSamples();
+    const now = Date.now();
+    const fresh = all.filter((s) => now - (s.queuedAt || 0) < SAMPLE_TTL_MS);
+    const expired = all.filter((s) => now - (s.queuedAt || 0) >= SAMPLE_TTL_MS);
+    fresh.sort((a, b) => (a.queuedAt || 0) - (b.queuedAt || 0));
+    const overflow = fresh.length > MAX_QUEUE ? fresh.slice(0, fresh.length - MAX_QUEUE) : [];
+    for (const s of [...expired, ...overflow]) await retractSample(s.key);
+  } catch {
+    /* ignore */
+  }
 }
 
 async function retractSample(key) {
@@ -64,26 +93,49 @@ async function queuedSamples() {
   });
 }
 
+// Best-effort upload. NOTHING here may throw to a caller or surface to the
+// user: if the ingest server is slow, down, or permanently cancelled, the
+// extension keeps blocking ads exactly the same and just retries later with
+// exponential backoff. Contribution is entirely severable.
 async function uploadDueSamples() {
-  const { collectOptIn, ingestUrl, ingestKey } = await getSettings();
-  if (!collectOptIn || !ingestUrl) return;
-  const { uploadCooldownMs } = await chrome.storage.local.get({ uploadCooldownMs: DEFAULT_COOLDOWN_MS });
-  const due = (await queuedSamples()).filter((s) => Date.now() - s.queuedAt > uploadCooldownMs);
-  if (!due.length) return;
-  for (const batch of [due.slice(0, 20)]) {
+  try {
+    const { collectOptIn, ingestUrl, ingestKey } = await getSettings();
+    if (!collectOptIn || !ingestUrl) return;
+    if (Date.now() < nextUploadAt) return; // in backoff after repeated failures
+
+    await enforceQueueCap(); // prune expired/overflow even when uploads never land
+    const { uploadCooldownMs } = await chrome.storage.local.get({ uploadCooldownMs: DEFAULT_COOLDOWN_MS });
+    const due = (await queuedSamples()).filter((s) => Date.now() - (s.queuedAt || 0) > uploadCooldownMs);
+    if (!due.length) return;
+
+    const batch = due.slice(0, 20);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), UPLOAD_TIMEOUT_MS);
+    let ok = false;
     try {
       const resp = await fetch(ingestUrl, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(ingestKey ? { "x-minus-key": ingestKey } : {}),
-        },
+        headers: { "Content-Type": "application/json", ...(ingestKey ? { "x-minus-key": ingestKey } : {}) },
         body: JSON.stringify({ v: 1, samples: batch }),
+        signal: ctrl.signal,
       });
-      if (resp.ok) for (const s of batch) await retractSample(s.key);
-    } catch {
-      // network down: keep queued, retry on next alarm
+      ok = resp.ok;
+    } finally {
+      clearTimeout(timer);
     }
+
+    if (ok) {
+      for (const s of batch) await retractSample(s.key);
+      uploadFailures = 0;
+      nextUploadAt = 0;
+    } else {
+      throw new Error("non-2xx"); // treat as failure -> backoff
+    }
+  } catch {
+    // server down / hung / cancelled: exponential backoff, never surface.
+    uploadFailures++;
+    const backoff = Math.min(MAX_BACKOFF_MS, 5 * 60_000 * 2 ** Math.min(uploadFailures, 7));
+    nextUploadAt = Date.now() + backoff;
   }
 }
 
