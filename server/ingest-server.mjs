@@ -16,8 +16,9 @@
 // POST /ingest  {v:1, samples:[{key, img(dataURL), p_ad, verdict, host, w, h, engine}]}
 // GET  /health  -> {ok, queued, uploaded, dataset}
 import { createServer } from "http";
-import { mkdirSync, writeFileSync, appendFileSync, readFileSync } from "fs";
+import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync } from "fs";
 import { join } from "path";
+import { createHash } from "crypto";
 
 const DIR = process.env.MINUS_INGEST_DIR || "./captures";
 const PORT = Number(process.env.PORT || 8790);
@@ -30,6 +31,15 @@ const RATE_MAX = 120;              // requests/min/IP
 const RATE_WINDOW_MS = 60_000;
 
 mkdirSync(join(DIR, "images"), { recursive: true });
+
+// Content-hash dedup: never store the same image twice (the extension can
+// capture an ad slot across several scans). Durable via a hashes file so it
+// survives restarts / scale-to-zero.
+const HASHES_FILE = join(DIR, "hashes.txt");
+const seenHashes = new Set(
+  existsSync(HASHES_FILE) ? readFileSync(HASHES_FILE, "utf8").split("\n").filter(Boolean) : []
+);
+let dupes = 0;
 
 // lazy-load the HF client so the server still boots without the dep for
 // local/no-upload testing
@@ -86,7 +96,7 @@ function send(res, code, obj) {
 createServer((req, res) => {
   if (req.method === "OPTIONS") return send(res, 200, {});
   if (req.method === "GET" && req.url === "/health")
-    return send(res, 200, { ok: true, queued, uploaded, pending: pending.length,
+    return send(res, 200, { ok: true, queued, uploaded, pending: pending.length, dupesSkipped: dupes,
       dataset: HF_DATASET || null, upload: !!(HF_DATASET && HF_TOKEN) });
   if (req.method !== "POST" || req.url !== "/ingest") return send(res, 404, { error: "not found" });
 
@@ -105,8 +115,12 @@ createServer((req, res) => {
       for (const s of samples) {
         const b64 = String(s.img || "").split(",")[1] || "";
         if (!b64) continue;
-        const id = `${day}_${String(s.key).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
         const png = Buffer.from(b64, "base64");
+        const hash = createHash("sha1").update(png).digest("hex");
+        if (seenHashes.has(hash)) { dupes++; continue; } // byte-identical duplicate — skip
+        seenHashes.add(hash);
+        appendFileSync(HASHES_FILE, hash + "\n");
+        const id = `${day}_${String(s.key).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
         writeFileSync(join(DIR, "images", `${id}.png`), png);
         const meta = { id, p_ad: s.p_ad, verdict: s.verdict, host: s.host, w: s.w, h: s.h,
           engine: s.engine, received: Date.now() };

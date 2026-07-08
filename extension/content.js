@@ -200,9 +200,13 @@
       if (!shot) return;
       const crops = [];
       const kept = [];
+      const seenRects = new Set(); // collapse overlapping candidates (iframe + wrapper + img) onto the same region -> identical crop
       for (const el of els) {
         const rect = el.getBoundingClientRect();
         if (!isVisible(el, rect)) continue;
+        const rk = `${Math.round(rect.left / 6)}_${Math.round(rect.top / 6)}_${Math.round(rect.width / 6)}_${Math.round(rect.height / 6)}`;
+        if (seenRects.has(rk)) continue; // same screen region as an earlier candidate -> would be a duplicate crop
+        seenRects.add(rk);
         const crop = cropFromShot(shot, rect);
         if (crop) { crops.push(crop); kept.push({ el, sig: signature(el, rect), ctx: hasAdContext(el) }); }
       }
