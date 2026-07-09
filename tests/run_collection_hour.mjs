@@ -9,7 +9,7 @@ import { join } from "path";
 const LOG = join(HERE, "..", "collection_hour.log");
 const log = (m) => { const s = `${new Date().toISOString()} ${m}`; console.log(s); try { appendFileSync(LOG, s + "\n"); } catch {} };
 
-const RUN_MS = 10 * 60 * 1000;      // 10-min live test
+const RUN_MS = 60 * 60 * 1000;      // 1-hour live soak (Iter 21-web default)
 const DWELL_MS = 35 * 1000;          // per page
 const SITES = [
   "https://www.nbcnews.com/", "https://www.foxnews.com/", "https://nypost.com/",
@@ -21,6 +21,15 @@ const SITES = [
   "https://www.businessinsider.com/", "https://www.thedailybeast.com/", "https://www.buzzfeed.com/",
   "https://www.cnet.com/", "https://www.tomsguide.com/", "https://www.androidcentral.com/",
   "https://www.motortrend.com/", "https://www.hotcars.com/", "https://www.cbr.com/",
+  // broadened mix: video, shopping, social, SPA, infinite-scroll, EU consent, reference
+  "https://www.youtube.com/", "https://www.youtube.com/results?search_query=news",
+  "https://www.amazon.com/s?k=headphones", "https://www.ebay.com/b/Laptops/175672",
+  "https://www.walmart.com/search?q=coffee+maker", "https://www.reddit.com/r/technology/",
+  "https://en.wikipedia.org/wiki/Cat", "https://en.wikipedia.org/wiki/Impressionism",
+  "https://www.theguardian.com/us", "https://www.bbc.com/news", "https://www.bild.de/",
+  "https://www.elmundo.es/", "https://www.lemonde.fr/", "https://www.espn.com/",
+  "https://www.weather.com/", "https://www.accuweather.com/", "https://www.imdb.com/",
+  "https://www.etsy.com/search?q=mug", "https://www.pinterest.com/search/pins/?q=recipes",
 ];
 
 const ctx = await launchWithExtension();
