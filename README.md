@@ -47,7 +47,7 @@ the popup (reloads the engine).
 | `lfm-web` | LFM Iter 20-web | Aggressive web-ad blocking (more FPs on product imagery). WebGPU only. |
 | `lfm-stream` | LFM Iter 14 | Streaming-tuned (99.08 % frozen holdout). WebGPU only. |
 | `siglip2` | SigLIP2-SO400M-384 fine-tune | Single forward pass, fast; large (~817 MB fp16). |
-| **`lite`** | ViT-B/16-SigLIP2-384, retrained on the Iter 21-web data | **The WASM fallback** — int8 (~93 MB), runs without WebGPU (~1–3 s/img). ~95 % frozen holdout. |
+| **`lite`** | ViT-B/16-SigLIP2-384, retrained on the Iter 21-web data | **The WASM fallback** — fp32 (~373 MB), runs without WebGPU (~1–3 s/img). 95.8 % frozen holdout (int8 quant collapses this ViT, so fp32). |
 
 ### WebGPU → WASM fallback
 

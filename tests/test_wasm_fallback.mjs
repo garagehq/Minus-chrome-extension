@@ -34,14 +34,16 @@ try {
   const t0 = Date.now();
   const info = await waitForEngine(ctx, 8 * 60 * 1000);
   check("engine reaches ready with WebGPU disabled", info.state === "ready", JSON.stringify(info));
-  check("engine device is wasm (fell back correctly)", info.device === "wasm", `device=${info.device} in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  check("fell back to Lite/SigLIP2 on WASM (not the WebGPU-only LFM)",
+    info.device === "wasm" && /lite|siglip2|B\/16/i.test(info.modelId || ""),
+    `device=${info.device} model=${info.modelId} in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
 
-  // Real classify through the offscreen engine.
+  // Real classify through the offscreen engine — an ad image must score as an ad.
   const res = await sw.evaluate((img) => new Promise((resolve) => {
     chrome.runtime.sendMessage({ target: "minus-offscreen", type: "classify", images: [img] }, resolve);
   }), adPng);
   const p = res?.results?.[0]?.p_ad;
-  check("WASM classify returns a valid p_ad in [0,1]", typeof p === "number" && p >= 0 && p <= 1, `p_ad=${p} err=${res?.results?.[0]?.error || ""}`);
+  check("WASM classify: ad image scored as an ad (p_ad >= 0.5)", typeof p === "number" && p >= 0.5, `p_ad=${p} err=${res?.results?.[0]?.error || ""}`);
   console.log("  classify result:", JSON.stringify(res?.results?.[0]));
 } catch (e) {
   console.log("FAIL  (exception)", String(e).split("\n")[0]);
