@@ -113,7 +113,7 @@ async function uploadDueSamples() {
     const due = (await queuedSamples()).filter((s) => Date.now() - (s.queuedAt || 0) > uploadCooldownMs);
     if (!due.length) return;
 
-    const batch = due.slice(0, 20);
+    const batch = due.slice(0, 6); // small batches: keep each POST light so it never times out
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), UPLOAD_TIMEOUT_MS);
     let ok = false;
