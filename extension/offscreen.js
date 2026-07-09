@@ -23,7 +23,7 @@ const HUB_MODEL = "onnx-community/LFM2.5-VL-450M-ONNX";
 // lfm (default) = Iter 21-web: catches web ads (72.7% clean-core) AND doesn't
 // false-positive product/book imagery (0.5% vs Iter 20-web's 60%). lfm-web
 // (Iter 20-web) kept selectable but superseded. lfm-iter14 = streaming-only.
-const LFM_MODELS = { lfm: "lfm-iter21web", "lfm-web": "lfm-iter20web", "lfm-stream": "lfm-iter14" };
+const LFM_MODELS = { lfm: "lfm-iter21web", "lfm-iter22": "lfm-iter22web", "lfm-web": "lfm-iter20web", "lfm-stream": "lfm-iter14" };
 const DEFAULT_LFM = "lfm-iter21web";
 
 let enginePromise = null;
