@@ -19,11 +19,18 @@ ort.env.wasm.wasmPaths = chrome.runtime.getURL("dist/");
 env.useBrowserCache = false;
 ort.env.logLevel = "error";
 
+// transformers.js/ORT default `powerPreference` to "high-performance" so
+// requestAdapter() picks the discrete GPU on multi-GPU machines. On Windows,
+// Chromium *ignores* powerPreference and logs a warning on every load
+// (crbug.com/369219127). Unset it on Windows only — a no-op there (it was being
+// ignored anyway), while keeping the discrete-GPU hint on macOS/Linux.
+if (/Windows/i.test(navigator.userAgent) && ort.env?.webgpu) {
+  ort.env.webgpu.powerPreference = undefined;
+}
+
 // A few loader warnings are emitted via console.* by ORT / transformers.js and
 // are benign for a packaged, local-only model. Filter exactly those strings so
-// the extension console stays clean without hiding real errors. (The WebGPU
-// "powerPreference ignored" line is emitted by Chromium itself, below the JS
-// console layer, so it can't be intercepted here — it's harmless.)
+// the extension console stays clean without hiding real errors.
 const MUTE = [
   "Unable to determine content-length",
   "Unable to add response to browser cache",
