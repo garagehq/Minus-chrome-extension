@@ -33,7 +33,8 @@ const DB_NAME = "minus-samples";
 // hammers a dead endpoint. Collection is best-effort and MUST never surface.
 const MAX_QUEUE = 400;                 // hard cap on queued samples
 const SAMPLE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // drop samples older than 7 days
-const UPLOAD_TIMEOUT_MS = 12 * 1000;   // give up on a hung server fast
+const UPLOAD_TIMEOUT_MS = 25 * 1000;   // allow a scale-to-zero server cold-start + HF push
+const BACKOFF_BASE_MS = 20 * 1000;     // gentle first retry (cold start != dead server)
 const MAX_BACKOFF_MS = 6 * 60 * 60 * 1000;     // cap backoff at 6h
 let uploadFailures = 0;                // consecutive failures -> exponential backoff
 let nextUploadAt = 0;                  // don't retry a dead server before this
@@ -138,7 +139,9 @@ async function uploadDueSamples() {
   } catch {
     // server down / hung / cancelled: exponential backoff, never surface.
     uploadFailures++;
-    const backoff = Math.min(MAX_BACKOFF_MS, 5 * 60_000 * 2 ** Math.min(uploadFailures, 7));
+    // Gentle ramp so a cold-start blip (scale-to-zero server waking) costs ~20s,
+    // not 10min; still backs off hard for a genuinely dead server.
+    const backoff = Math.min(MAX_BACKOFF_MS, BACKOFF_BASE_MS * 2 ** Math.min(uploadFailures - 1, 9));
     nextUploadAt = Date.now() + backoff;
   }
 }
