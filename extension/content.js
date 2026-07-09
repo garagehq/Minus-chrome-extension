@@ -48,6 +48,7 @@
   const MIN_CROP_STDDEV = 11;              // reject near-blank crops (whitespace/nav wrappers)
 
   let enabled = true;
+  let blockVideo = true, blockDisplay = true; // per-type toggles (popup)
   let collectOptIn = false;                // anonymous snapshot contribution
   const allowed = new WeakSet();           // user clicked X
   const sampleKeys = new WeakMap();        // element -> queued sample key (for retraction)
@@ -83,8 +84,25 @@
     if (resp?.ok) {
       enabled = resp.settings.enabled;
       collectOptIn = !!resp.settings.collectOptIn;
+      blockVideo = resp.settings.blockVideo !== false;
+      blockDisplay = resp.settings.blockDisplay !== false;
     }
     if (enabled) start();
+  });
+
+  // React live to popup toggle changes (no reload): update the flags, and clear
+  // any overlays whose type was just switched off. New scans respect the flags.
+  chrome.storage?.onChanged?.addListener((changes, area) => {
+    if (area !== "local") return;
+    if ("blockVideo" in changes) blockVideo = changes.blockVideo.newValue !== false;
+    if ("blockDisplay" in changes) blockDisplay = changes.blockDisplay.newValue !== false;
+    for (const [el, div] of overlays) {
+      const kind = div.dataset.minusKind;
+      if ((kind === "video" && !blockVideo) || (kind === "display" && !blockDisplay)) {
+        div.remove(); overlays.delete(el);
+      }
+    }
+    reportBlocked();
   });
 
   // Opt-in only: queue a blocked element's crop for contribution. The
@@ -223,12 +241,12 @@
 
   // ---------------------------------------------------------------- classify
   async function scan() {
-    if (!enabled || scanning || document.hidden) return;
+    if (!enabled || scanning || document.hidden || !blockDisplay) return; // display path
     scanning = true;
     try {
       const els = candidates().filter((el) => {
         const sig = signature(el, el.getBoundingClientRect());
-        if (verdictCache.get(sig) === true) { block(el); return false; }
+        if (verdictCache.get(sig) === true) { block(el, undefined, "display"); return false; }
         return !verdictCache.has(sig);
       }).slice(0, 12); // cap batch per scan
       if (!els.length) return;
@@ -269,7 +287,7 @@
         verdictCache.set(sig, isAd);
         if (verdictCache.size > 500) verdictCache.delete(verdictCache.keys().next().value);
         if (isAd) {
-          block(el, r.p_ad);
+          block(el, r.p_ad, "display");
           maybeQueueSample(el, crops[i], r);
         }
       });
@@ -348,11 +366,14 @@
   }
 
   // ---------------------------------------------------------------- overlay
-  function block(el, pAd) {
+  // kind: "display" (static img/iframe/ad-slot) or "video" (in-player / playing
+  // iframe). Stored on the overlay so a popup type-toggle can clear it live.
+  function block(el, pAd, kind = "display") {
     if (overlays.has(el) || allowed.has(el)) return;
     const card = MINUS_SPANISH[Math.floor(Math.random() * MINUS_SPANISH.length)];
     const div = document.createElement("div");
     div.setAttribute("data-minus-overlay", "");
+    div.dataset.minusKind = kind;
     div.innerHTML = `
       <button class="minus-x" title="Show this ad">&times;</button>
       <div class="minus-brand">minus</div>
@@ -528,7 +549,7 @@
   }
 
   async function sampleVideos() {
-    if (!enabled || document.hidden) return;
+    if (!enabled || document.hidden || !blockVideo) return; // video path
     const videos = [...document.querySelectorAll("video")].filter((v) => {
       const r = v.getBoundingClientRect();
       return !allowed.has(v) && !v.paused && isVisible(v, r);
@@ -570,7 +591,7 @@
       if (r.is_ad) { st.adVotes++; st.nonAdVotes = 0; } else { st.nonAdVotes++; st.adVotes = 0; }
       if (!st.blocked && st.adVotes >= VIDEO_HYSTERESIS) {
         st.blocked = true;
-        block(v, r.p_ad);
+        block(v, r.p_ad, "video");
       } else if (st.blocked && st.nonAdVotes >= VIDEO_HYSTERESIS) {
         st.blocked = false;
         overlays.get(v)?.remove();
@@ -625,6 +646,7 @@
 
   async function sampleIframes() {
     if (!IS_TOP || !enabled || document.hidden) return;
+    if (!blockVideo && !blockDisplay) return; // this sampler feeds both types
     const frames = [...document.querySelectorAll("iframe")].filter((f) => {
       if (allowed.has(f) || !isCrossOriginFrame(f)) return false;
       const r = f.getBoundingClientRect();
@@ -642,9 +664,10 @@
       const moving = st.fp && fpDiff(st.fp, frame.fp) > IFRAME_MOTION;
       st.fp = frame.fp;
       iframeState.set(f, st);
-      // Reclassify things that are actually playing; classify a still iframe once.
-      if (moving) pending.push({ f, url: frame.url, st, motion: true });
-      else if (!st.classified) pending.push({ f, url: frame.url, st, motion: false });
+      // Reclassify things that are actually playing (video); classify a still
+      // iframe once (display). Respect the per-type toggles.
+      if (moving) { if (blockVideo) pending.push({ f, url: frame.url, st, motion: true }); }
+      else if (!st.classified && blockDisplay) pending.push({ f, url: frame.url, st, motion: false });
     }
     if (!pending.length) return;
 
@@ -656,12 +679,12 @@
       st.classified = true;
       if (motion) {
         if (r.is_ad) { st.adVotes++; st.nonAdVotes = 0; } else { st.nonAdVotes++; st.adVotes = 0; }
-        if (!st.blocked && st.adVotes >= VIDEO_HYSTERESIS) { st.blocked = true; block(f, r.p_ad); }
+        if (!st.blocked && st.adVotes >= VIDEO_HYSTERESIS) { st.blocked = true; block(f, r.p_ad, "video"); }
         else if (st.blocked && st.nonAdVotes >= VIDEO_HYSTERESIS) {
           st.blocked = false; overlays.get(f)?.remove(); overlays.delete(f); reportBlocked();
         }
       } else if (r.is_ad && !st.blocked) {   // still iframe: one-shot, persistent (display-ad behavior)
-        st.blocked = true; block(f, r.p_ad);
+        st.blocked = true; block(f, r.p_ad, "display");
       }
       iframeState.set(f, st);
     });

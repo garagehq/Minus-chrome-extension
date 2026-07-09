@@ -8,6 +8,8 @@ const DEFAULTS = {
   threshold: 0.5,
   enabled: true,
   engineKind: "lfm",
+  blockVideo: true,                  // cover video ads (in-player / iframe)
+  blockDisplay: true,                // cover static display ads (img / iframe / ad-slot)
   collectOptIn: false,               // anonymous ad-snapshot contribution (opt-in)
   // Pre-wired ingest endpoint so opting in just works. Collection still requires
   // collectOptIn=true (per-user, off by default), so nothing sends until a user

@@ -1,4 +1,4 @@
-const DEFAULTS = { threshold: 0.5, enabled: true, engineKind: "lfm", disabledSites: [], collectOptIn: false };
+const DEFAULTS = { threshold: 0.5, enabled: true, engineKind: "lfm", disabledSites: [], collectOptIn: false, blockVideo: true, blockDisplay: true };
 
 let currentHost = "";
 let currentTabId = null;
@@ -72,6 +72,8 @@ async function load() {
   const s = { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) };
   document.getElementById("enabled").checked = s.enabled;
   document.getElementById("collect").checked = s.collectOptIn;
+  document.getElementById("blockVideo").checked = s.blockVideo;
+  document.getElementById("blockDisplay").checked = s.blockDisplay;
   document.getElementById("threshold").value = s.threshold;
   await loadEngineOptions();
   document.getElementById("engineKind").value = s.engineKind;
@@ -102,6 +104,8 @@ async function saveGeneral() {
   await chrome.storage.local.set({
     enabled: document.getElementById("enabled").checked,
     collectOptIn: document.getElementById("collect").checked,
+    blockVideo: document.getElementById("blockVideo").checked,
+    blockDisplay: document.getElementById("blockDisplay").checked,
     threshold: Math.min(1, Math.max(0, parseFloat(document.getElementById("threshold").value) || DEFAULTS.threshold)),
     engineKind: document.getElementById("engineKind").value,
   });
@@ -117,7 +121,7 @@ async function saveSite() {
   await chrome.storage.local.set({ disabledSites: [...set] });
 }
 
-for (const id of ["enabled", "collect", "threshold", "engineKind"]) {
+for (const id of ["enabled", "collect", "blockVideo", "blockDisplay", "threshold", "engineKind"]) {
   document.getElementById(id).addEventListener("change", saveGeneral);
 }
 document.getElementById("siteEnabled").addEventListener("change", saveSite);
