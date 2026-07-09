@@ -47,6 +47,10 @@ try {
   }
   check("Video toggle OFF -> video ad NOT covered", coveredDuringAd === false);
   await page3.close();
+
+  // Restore defaults — this runs on the shared profile, so a leftover
+  // blockVideo:false would silently gate the video path in later tests.
+  await set(sw, { blockVideo: true, blockDisplay: true, disabledSites: [] });
 } catch (e) {
   console.log("FAIL  (exception)", String(e).split("\n")[0]);
   failures++;

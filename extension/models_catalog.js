@@ -16,7 +16,6 @@ export const FALLBACK_CATALOG = {
     { key: "lfm-web", dir: "lfm-iter20web", kind: "lfm", label: "LFM Iter 20-web (aggressive web-ad blocking)" },
     { key: "lfm-stream", dir: "lfm-iter14", kind: "lfm", label: "LFM Iter 14 (streaming-only)" },
     { key: "siglip2", dir: "siglip2", kind: "siglip2", label: "SigLIP2-384 (fast)" },
-    { key: "lite", dir: "lite", kind: "siglip2", label: "Lite B/16 (WASM fallback — no-WebGPU, Iter 21-web, fp32)" },
   ],
 };
 

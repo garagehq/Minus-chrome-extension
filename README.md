@@ -47,19 +47,21 @@ the popup (reloads the engine).
 | `lfm-web` | LFM Iter 20-web | Aggressive web-ad blocking (more FPs on product imagery). WebGPU only. |
 | `lfm-stream` | LFM Iter 14 | Streaming-tuned (99.08 % frozen holdout). WebGPU only. |
 | `siglip2` | SigLIP2-SO400M-384 fine-tune | Single forward pass, fast; large (~817 MB fp16). |
-| **`lite`** | ViT-B/16-SigLIP2-384, retrained on the Iter 21-web data | **The WASM fallback** — fp32 (~373 MB), runs without WebGPU (~1–3 s/img). 95.8 % frozen holdout (int8 quant collapses this ViT, so fp32). |
 
-### WebGPU → WASM fallback
+### Requires WebGPU
 
-The LFM engines are **WebGPU-only**: their quantized graph uses the
-`GatherBlockQuantized` op, which ONNX-Runtime's WASM backend can't run. So on a
-machine where WebGPU is unavailable, requesting an LFM engine **automatically
-falls back to the `lite` SigLIP2 model on WASM** — a working (if slower, slightly
-less accurate) classifier instead of a dead engine. WebGPU is on by default in
-Chrome/Edge 121+; if you've disabled it, the popup status will tell you.
+The default LFM engines are **WebGPU-only** — their quantized graph uses the
+`GatherBlockQuantized` op, which ONNX-Runtime's WASM backend can't run. WebGPU is
+on by default in Chrome/Edge 121+; if it's unavailable the popup status shows a
+clear "needs WebGPU — enable it and reload" message. The WebGPU load and warm-up
+are timeout-bounded, so a flaky GPU driver can't wedge the engine.
 
-The WebGPU load and warm-up are timeout-bounded, so a flaky GPU driver can't
-wedge the engine — it recovers to WASM automatically.
+> A retrained SigLIP2-Lite **WASM fallback** was prototyped so no-WebGPU
+> machines could still run a classifier, but shelved — WASM inference for this
+> ViT is ~7 s/image, too slow for a real experience (int8 quant, which would
+> shrink it, collapses this model's ad recall). The work lives on the
+> [`siglip2-wasm-fallback`](https://github.com/garagehq/Minus-chrome-extension/tree/siglip2-wasm-fallback)
+> branch.
 
 ## Install (unpacked)
 
@@ -76,9 +78,8 @@ Requirements: Chrome/Chromium/Edge 121+ (WebGPU recommended); ~1–2 GB free RAM
 **Platforms.** WebGPU has shipped in Chrome since 113 on **macOS** (backed by
 Metal — both Apple Silicon and Intel Macs), Windows (D3D12), and ChromeOS, and
 on Linux more recently. So the default LFM engine runs on the GPU on essentially
-all current desktop Chrome/Edge installs; the WASM SigLIP2 fallback covers the
-rest. Apple Silicon Macs are an especially good fit (unified memory + a strong
-Metal GPU).
+all current desktop Chrome/Edge installs. Apple Silicon Macs are an especially
+good fit (unified memory + a strong Metal GPU).
 
 ## Architecture
 

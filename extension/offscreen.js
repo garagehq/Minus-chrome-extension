@@ -103,13 +103,6 @@ async function warmUpWebGpu(tries = 5, delayMs = 1200) {
   return false;
 }
 
-// Cache the (relatively expensive) WebGPU probe — used both to pick the LFM
-// device and to decide whether to fall back to a WASM-capable engine.
-let webgpuOk = null;
-async function webgpuUsable() {
-  if (webgpuOk === null) webgpuOk = await warmUpWebGpu();
-  return webgpuOk;
-}
 
 // Reject if `promise` doesn't settle within `ms`. Used to bound WebGPU model
 // load + warm-up, which can HANG (not throw) on flaky GPU drivers — without a
@@ -136,7 +129,7 @@ async function loadEngine(entry) {
 
   // Validated combo (parity vs PyTorch: ad 0.999 / non-ad 0.031): 431MB total.
   const dtype = { vision_encoder: "q8", embed_tokens: "q8", decoder_model_merged: "q4" };
-  let device = (await webgpuUsable()) ? "webgpu" : "wasm";
+  let device = (await warmUpWebGpu()) ? "webgpu" : "wasm";
   engineInfo = { state: "loading", modelId, device };
 
   // aggregate download/load progress for the popup (file -> fraction)
@@ -227,10 +220,8 @@ async function loadSiglip2Engine(entry) {
   const base = chrome.runtime.getURL(`models/${dir}/`);
   const fp16 = `${base}model_fp16.onnx`;
   const fp32 = `${base}model.onnx`;
-  const int8 = `${base}model_int8.onnx`;                 // small, WASM-friendly (the fallback build)
   const haveFp16 = await exists(fp16);
   const haveFp32 = await exists(fp32);
-  const haveInt8 = await exists(int8);
 
   // WebGL EP is only present when built against onnxruntime-web/all.
   const hasWebgl = !!(ort.env?.webgl) || (ort.backends && "webgl" in ort.backends);
@@ -238,7 +229,6 @@ async function loadSiglip2Engine(entry) {
   if (haveFp16) plan.push({ ep: "webgpu", url: fp16, needWarmup: true });
   if (haveFp32) plan.push({ ep: "webgpu", url: fp32, needWarmup: true });
   if (haveFp32 && hasWebgl) plan.push({ ep: "webgl", url: fp32 });
-  if (haveInt8) plan.push({ ep: "wasm", url: int8 });    // primary WASM path (int8 dynamic-quant ViT)
   if (haveFp32) plan.push({ ep: "wasm", url: fp32 });
   if (!plan.length) throw new Error("no SigLIP2 model packaged");
 
@@ -288,14 +278,7 @@ async function siglip2Classify(engine, dataUrl) {
 let loadedEngineKey = null;
 async function getEngine(engineKind = "lfm") {
   const catalog = await getCatalog();
-  let entry = resolveModel(catalog, engineKind);
-  // The quantized LFM engines only run on WebGPU. If WebGPU isn't usable, fall
-  // back to the WASM-capable SigLIP2 "lite" model so no-WebGPU users still get a
-  // working ad classifier (slower, slightly less accurate) instead of a dead one.
-  if (entry.kind === "lfm" && !(await webgpuUsable())) {
-    const lite = resolveModel(catalog, "lite");
-    if (lite && lite.kind === "siglip2") entry = lite;
-  }
+  const entry = resolveModel(catalog, engineKind);
   if (enginePromise && loadedEngineKey !== entry.key) {
     enginePromise = null;
     engineInfo = { state: "cold" };
