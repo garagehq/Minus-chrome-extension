@@ -153,39 +153,17 @@ chrome.alarms.onAlarm.addListener((a) => {
 // tests poke this via minus:flush-samples; harmless in production
 
 
-// ---------------------------------------------------------------- context menu
-// Native menus can't take CSS, so "styling" here = a disabled wordmark header,
-// separators grouping the toggles, and clearer labels. IDs are unchanged so the
-// onClicked handler below still routes correctly.
-async function rebuildMenus() {
-  const s = await getSettings();
-  await chrome.contextMenus.removeAll();
-  chrome.contextMenus.create({
-    id: "header", title: "◾ MINUS — vision ad blocker", enabled: false, contexts: ["action"],
-  });
-  chrome.contextMenus.create({ id: "sep-1", type: "separator", contexts: ["action"] });
-  chrome.contextMenus.create({
-    id: "toggle-global", title: "🛡  Block ads — all sites", type: "checkbox",
-    checked: s.enabled, contexts: ["action"],
-  });
-  chrome.contextMenus.create({
-    id: "toggle-site", title: "🌐  Block ads on this site", type: "checkbox",
-    checked: true, contexts: ["action"],
-  });
-  chrome.contextMenus.create({ id: "sep-2", type: "separator", contexts: ["action"] });
-  chrome.contextMenus.create({
-    id: "toggle-collect", type: "checkbox", checked: s.collectOptIn, contexts: ["action"],
-    title: "📸  Contribute anonymous ad snapshots",
-  });
-}
-
+// ---------------------------------------------------------------- action style
+// All controls live in the left-click popup (popup.html) — enable/disable,
+// per-site toggle, engine, threshold, and the anonymous-snapshot opt-in. There
+// is no native right-click menu (it can't be styled and duplicated the popup).
 function initActionStyle() {
   chrome.action.setBadgeBackgroundColor({ color: "#3b82f6" });
   chrome.action.setBadgeTextColor?.({ color: "#ffffff" });
 }
 
-chrome.runtime.onInstalled.addListener(() => { rebuildMenus(); initActionStyle(); });
-chrome.runtime.onStartup?.addListener(() => { rebuildMenus(); initActionStyle(); });
+chrome.runtime.onInstalled.addListener(initActionStyle);
+chrome.runtime.onStartup?.addListener(initActionStyle);
 initActionStyle();
 
 // ---------------------------------------------------------------- badge / icon
@@ -194,7 +172,18 @@ initActionStyle();
 // script reports its live blocked count; we paint the matching tab's action.
 const ICON_BLUE = { 16: "icons/m-blue-16.png", 32: "icons/m-blue-32.png", 48: "icons/m-blue-48.png", 128: "icons/m-blue-128.png" };
 const ICON_RED = { 16: "icons/m-red-16.png", 32: "icons/m-red-32.png", 48: "icons/m-red-48.png", 128: "icons/m-red-128.png" };
-const blockedByTab = new Map(); // tabId -> current blocked count
+// tabId -> Map(frameId -> count). The content script runs in every frame
+// (all_frames), so the badge is the SUM of each frame's live blocked count.
+const blockedByTab = new Map();
+
+function setFrameCount(tabId, frameId, count) {
+  let frames = blockedByTab.get(tabId);
+  if (!frames) { frames = new Map(); blockedByTab.set(tabId, frames); }
+  if (count > 0) frames.set(frameId, count); else frames.delete(frameId);
+  let total = 0;
+  for (const c of frames.values()) total += c;
+  return total;
+}
 
 async function paintAction(tabId, count) {
   try {
@@ -203,40 +192,14 @@ async function paintAction(tabId, count) {
   } catch { /* tab gone / not paintable (e.g. chrome:// pages) */ }
 }
 
-// Reset the counter when a tab navigates so the badge reflects the current page.
+// Reset the counter when the tab's main frame navigates (clears all sub-frames).
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === "loading") {
-    blockedByTab.set(tabId, 0);
+    blockedByTab.delete(tabId);
     paintAction(tabId, 0);
   }
 });
 chrome.tabs.onRemoved.addListener((tabId) => blockedByTab.delete(tabId));
-
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  const s = await getSettings();
-  if (info.menuItemId === "toggle-global") {
-    await chrome.storage.local.set({ enabled: info.checked });
-  } else if (info.menuItemId === "toggle-collect") {
-    await chrome.storage.local.set({ collectOptIn: info.checked });
-  } else if (info.menuItemId === "toggle-site" && tab?.url) {
-    const host = new URL(tab.url).hostname;
-    const sites = new Set(s.disabledSites);
-    if (info.checked) sites.delete(host); else sites.add(host);
-    await chrome.storage.local.set({ disabledSites: [...sites] });
-  }
-});
-
-// keep the per-site checkbox in sync with the active tab
-chrome.tabs.onActivated.addListener(async ({ tabId }) => {
-  try {
-    const tab = await chrome.tabs.get(tabId);
-    if (!tab.url?.startsWith("http")) return;
-    const { disabledSites } = await getSettings();
-    chrome.contextMenus.update("toggle-site", {
-      checked: !disabledSites.includes(new URL(tab.url).hostname),
-    });
-  } catch {}
-});
 
 // ---------------------------------------------------------------- offscreen
 let offscreenReady = null;
@@ -322,9 +285,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       } else if (msg.type === "minus:blocked") {
         const tabId = sender.tab?.id;
         if (tabId != null) {
-          const count = Math.max(0, msg.count | 0);
-          blockedByTab.set(tabId, count);
-          paintAction(tabId, count);
+          const total = setFrameCount(tabId, sender.frameId ?? 0, Math.max(0, msg.count | 0));
+          paintAction(tabId, total);
         }
         sendResponse({ ok: true });
       } else if (msg.type === "minus:queue-sample") {

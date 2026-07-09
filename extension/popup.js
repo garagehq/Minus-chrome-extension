@@ -1,7 +1,18 @@
-const DEFAULTS = { threshold: 0.5, enabled: true, engineKind: "lfm" };
+const DEFAULTS = { threshold: 0.5, enabled: true, engineKind: "lfm", disabledSites: [], collectOptIn: false };
+
+let currentHost = "";
 
 function ask(msg) {
   return new Promise((resolve) => chrome.runtime.sendMessage(msg, resolve));
+}
+
+async function activeHost() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return tab?.url && tab.url.startsWith("http") ? new URL(tab.url).hostname : "";
+  } catch {
+    return "";
+  }
 }
 
 async function refreshStatus() {
@@ -52,22 +63,49 @@ async function loadEngineOptions() {
 async function load() {
   const s = { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) };
   document.getElementById("enabled").checked = s.enabled;
+  document.getElementById("collect").checked = s.collectOptIn;
   document.getElementById("threshold").value = s.threshold;
   await loadEngineOptions();
   document.getElementById("engineKind").value = s.engineKind;
+
+  currentHost = await activeHost();
+  const site = document.getElementById("siteEnabled");
+  const siteLabel = document.getElementById("siteLabel");
+  if (currentHost) {
+    site.checked = !s.disabledSites.includes(currentHost);
+    site.disabled = false;
+    siteLabel.textContent = `Block on ${currentHost}`;
+  } else {
+    site.checked = false;
+    site.disabled = true;
+    siteLabel.textContent = "Block on this site (n/a)";
+  }
+
   refreshStatus();
   setInterval(refreshStatus, 1500);
 }
 
-async function save() {
+async function saveGeneral() {
   await chrome.storage.local.set({
     enabled: document.getElementById("enabled").checked,
+    collectOptIn: document.getElementById("collect").checked,
     threshold: Math.min(1, Math.max(0, parseFloat(document.getElementById("threshold").value) || DEFAULTS.threshold)),
     engineKind: document.getElementById("engineKind").value,
   });
 }
 
-for (const id of ["enabled", "threshold", "engineKind"]) {
-  document.getElementById(id).addEventListener("change", save);
+// Per-site toggle writes the hostname in/out of the disabledSites list.
+async function saveSite() {
+  if (!currentHost) return;
+  const { disabledSites = [] } = await chrome.storage.local.get({ disabledSites: [] });
+  const set = new Set(disabledSites);
+  if (document.getElementById("siteEnabled").checked) set.delete(currentHost);
+  else set.add(currentHost);
+  await chrome.storage.local.set({ disabledSites: [...set] });
 }
+
+for (const id of ["enabled", "collect", "threshold", "engineKind"]) {
+  document.getElementById(id).addEventListener("change", saveGeneral);
+}
+document.getElementById("siteEnabled").addEventListener("change", saveSite);
 load();

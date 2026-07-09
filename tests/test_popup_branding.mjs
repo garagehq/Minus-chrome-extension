@@ -33,6 +33,23 @@ try {
   });
 
   check("VT323 font loaded", info.vt323 === true, `fonts.check=${info.vt323}`);
+
+  // Guard against the wrong-font regression: VT323 is monospace, so "i" and "W"
+  // must render the same width. A serif/proportional fallback (the bug we hit)
+  // would make them very different even though fonts.check() still returns true.
+  const mono = await page.evaluate(() => {
+    const w = (ch) => {
+      const s = document.createElement("span");
+      s.style.cssText = "font-family:'VT323',monospace;font-size:100px;position:absolute;visibility:hidden;white-space:pre";
+      s.textContent = ch;
+      document.body.appendChild(s);
+      const width = s.getBoundingClientRect().width;
+      s.remove();
+      return width;
+    };
+    return { i: w("i"), W: w("W") };
+  });
+  check("VT323 is the real (monospace) font, not a serif fallback", Math.abs(mono.i - mono.W) < 2, `i=${mono.i} W=${mono.W}`);
   check("wordmark uses VT323", /VT323/.test(info.wordmark), info.wordmark);
   check("charset intact (en-dash, no U+FFFD)", info.thresholdLabel.includes("–") && !info.badChar, info.thresholdLabel);
   check("default engine label is Iter 21-web (not 14)", info.defaultOpt.includes("Iter 21-web") && !info.defaultOpt.includes("Iter 14"), info.defaultOpt);

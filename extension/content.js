@@ -13,6 +13,8 @@
   const SCAN_DEBOUNCE_MS = 700;
   const VIDEO_SAMPLE_MS = 2500;
   const VIDEO_HYSTERESIS = 2;              // consecutive verdicts to flip state
+  const IFRAME_MIN_W = 400, IFRAME_MIN_H = 225; // ~video-player-sized cross-origin frames (#2)
+  const IFRAME_MOTION = 6;                 // mean 8x8 luma delta between ticks => "playing"
   // Boundary = any non-alphanumeric (so "ad-slot", "slot-ad", "box ad", "/ad/"
   // all match, but "gradient"/"shadow"/"download" don't). The old [-_\b] set
   // excluded whitespace, so an id ending in "-ad" (e.g. "shadow-ad") missed.
@@ -52,6 +54,12 @@
   const verdictCache = new Map();          // signature -> is_ad
   const overlays = new Map();              // element -> overlay div
   const videoState = new WeakMap();        // video -> {adVotes, nonAdVotes, blocked}
+  const iframeState = new WeakMap();        // large cross-origin iframe -> {fp, adVotes, nonAdVotes, blocked, classified}
+  // The content script runs in every frame (manifest all_frames). The TOP frame
+  // does the full static scan + tab-screenshot work; SUB-frames run only the
+  // <video> path (reading frames directly off the element, no tab screenshot —
+  // its coordinates are the top frame's, not this frame's).
+  const IS_TOP = window.top === window;
   let scanTimer = null;
   let scanning = false;
   let lastReported = -1;
@@ -65,6 +73,11 @@
     lastReported = n;
     try { chrome.runtime.sendMessage({ type: "minus:blocked", count: n }); } catch {}
   }
+
+  // Sub-frames only ever run the video path, so skip frames too small to host a
+  // visible player — this keeps us out of the swarm of tracking pixels / 1x1
+  // and chrome iframes that all_frames would otherwise inject into.
+  if (!IS_TOP && (innerWidth < 160 || innerHeight < 120)) return;
 
   chrome.runtime.sendMessage({ type: "minus:settings" }, (resp) => {
     if (resp?.ok) {
@@ -96,12 +109,17 @@
   }
 
   function start() {
-    scheduleScan(200);
-    new MutationObserver(() => scheduleScan(SCAN_DEBOUNCE_MS))
-      .observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["src", "class", "id", "style"] });
-    addEventListener("scroll", () => scheduleScan(SCAN_DEBOUNCE_MS), { passive: true });
-    addEventListener("resize", () => scheduleScan(SCAN_DEBOUNCE_MS), { passive: true });
-    setInterval(sampleVideos, VIDEO_SAMPLE_MS);
+    // Static DOM scan + large-iframe motion sampler are top-frame only (they
+    // rely on the tab screenshot, whose coordinates are the top viewport's).
+    if (IS_TOP) {
+      scheduleScan(200);
+      new MutationObserver(() => scheduleScan(SCAN_DEBOUNCE_MS))
+        .observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["src", "class", "id", "style"] });
+      addEventListener("scroll", () => scheduleScan(SCAN_DEBOUNCE_MS), { passive: true });
+      addEventListener("resize", () => scheduleScan(SCAN_DEBOUNCE_MS), { passive: true });
+      setInterval(sampleIframes, VIDEO_SAMPLE_MS);
+    }
+    setInterval(sampleVideos, VIDEO_SAMPLE_MS);  // runs in every frame
     requestAnimationFrame(trackOverlays);
   }
 
@@ -194,6 +212,11 @@
       const rect = el.getBoundingClientRect();
       if (!isVisible(el, rect)) return false;
       if (!adPlausibleShape(rect)) return false;          // single ad slot only, no content columns
+      // Large iframes (player-sized) are tracked over time, not one-shot here:
+      // same-origin ones by their own in-frame video path (#1), cross-origin by
+      // the motion sampler (#2). One-shotting them would fight those (and leave
+      // a stale cover after a video ad ends, since the static verdict is cached).
+      if (el.tagName === "IFRAME" && rect.width >= IFRAME_MIN_W && rect.height >= IFRAME_MIN_H) return false;
       return true;
     });
   }
@@ -516,7 +539,9 @@
     for (const v of videos) {
       const direct = frameFromVideo(v);
       if (direct) { crops.push(direct); kept.push(v); }
-      else needShot.push(v);
+      else if (IS_TOP) needShot.push(v); // screenshot fallback needs top-frame coordinates
+      // in a sub-frame a video we can't read directly is skipped (#2's top-frame
+      // motion sampler covers its iframe instead)
     }
 
     if (needShot.length) {
@@ -553,6 +578,92 @@
         reportBlocked();
       }
       videoState.set(v, st);
+    });
+  }
+
+  // ---------------------------------------------------------------- iframe video (#2)
+  // The top frame can't see inside a cross-origin iframe, but it CAN crop the
+  // iframe's rendered pixels from the tab screenshot. A large iframe that is
+  // visibly ANIMATING is a playing embedded video/ad the inner content script
+  // couldn't read (tainted); we resample + reclassify it over time with the
+  // same hysteresis as <video>, so an embedded pre-roll flips on/off. A large
+  // iframe that's static gets a one-shot verdict (like the display path).
+  // Same-origin iframes are left to their own injected content script.
+  function isCrossOriginFrame(iframe) {
+    try { return !iframe.contentDocument; } catch { return true; }
+  }
+
+  // Crop the iframe region from the tab screenshot; return { url, fp } where fp
+  // is an 8x8 luminance grid used to detect motion between ticks. null if unusable.
+  function iframeFrameAndFp(shot, rect) {
+    const scale = shot.width / innerWidth;
+    const sx = Math.max(0, rect.left) * scale, sy = Math.max(0, rect.top) * scale;
+    const sw = (Math.min(rect.right, innerWidth) - Math.max(0, rect.left)) * scale;
+    const sh = (Math.min(rect.bottom, innerHeight) - Math.max(0, rect.top)) * scale;
+    if (sw < 32 || sh < 32) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(sw); canvas.height = Math.round(sh);
+    const ctx2d = canvas.getContext("2d");
+    ctx2d.drawImage(shot, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    const url = canvas.toDataURL("image/png");
+    const g = 8, fp = new Float32Array(g * g), cw = canvas.width, ch = canvas.height;
+    const data = ctx2d.getImageData(0, 0, cw, ch).data;
+    for (let gy = 0; gy < g; gy++) for (let gx = 0; gx < g; gx++) {
+      const x = Math.min(cw - 1, Math.floor((gx + 0.5) * cw / g));
+      const y = Math.min(ch - 1, Math.floor((gy + 0.5) * ch / g));
+      const i = (y * cw + x) * 4;
+      fp[gy * g + gx] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    }
+    return { url, fp };
+  }
+
+  function fpDiff(a, b) {
+    let s = 0;
+    for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]);
+    return s / a.length;
+  }
+
+  async function sampleIframes() {
+    if (!IS_TOP || !enabled || document.hidden) return;
+    const frames = [...document.querySelectorAll("iframe")].filter((f) => {
+      if (allowed.has(f) || !isCrossOriginFrame(f)) return false;
+      const r = f.getBoundingClientRect();
+      return r.width >= IFRAME_MIN_W && r.height >= IFRAME_MIN_H && isVisible(f, r);
+    });
+    if (!frames.length) return;
+    const shot = await captureClean();  // hide our own cards so we read iframe pixels
+    if (!shot) return;
+
+    const pending = [];
+    for (const f of frames) {
+      const frame = iframeFrameAndFp(shot, f.getBoundingClientRect());
+      if (!frame) continue;
+      const st = iframeState.get(f) || { fp: null, adVotes: 0, nonAdVotes: 0, blocked: false, classified: false };
+      const moving = st.fp && fpDiff(st.fp, frame.fp) > IFRAME_MOTION;
+      st.fp = frame.fp;
+      iframeState.set(f, st);
+      // Reclassify things that are actually playing; classify a still iframe once.
+      if (moving) pending.push({ f, url: frame.url, st, motion: true });
+      else if (!st.classified) pending.push({ f, url: frame.url, st, motion: false });
+    }
+    if (!pending.length) return;
+
+    const results = await classifyBatch(pending.map((p) => p.url));
+    if (!results) return;
+    results.forEach((r, i) => {
+      if (r.error) return; // transient errors are not votes
+      const { f, st, motion } = pending[i];
+      st.classified = true;
+      if (motion) {
+        if (r.is_ad) { st.adVotes++; st.nonAdVotes = 0; } else { st.nonAdVotes++; st.adVotes = 0; }
+        if (!st.blocked && st.adVotes >= VIDEO_HYSTERESIS) { st.blocked = true; block(f, r.p_ad); }
+        else if (st.blocked && st.nonAdVotes >= VIDEO_HYSTERESIS) {
+          st.blocked = false; overlays.get(f)?.remove(); overlays.delete(f); reportBlocked();
+        }
+      } else if (r.is_ad && !st.blocked) {   // still iframe: one-shot, persistent (display-ad behavior)
+        st.blocked = true; block(f, r.p_ad);
+      }
+      iframeState.set(f, st);
     });
   }
 })();

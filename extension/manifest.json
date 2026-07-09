@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Minus — vision ad blocker",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Blocks ads the way the minus device does — by looking at them. Ad elements are detected with a vision model and covered with Spanish flashcards.",
-  "permissions": ["activeTab", "tabs", "storage", "scripting", "offscreen", "contextMenus", "alarms", "unlimitedStorage"],
+  "permissions": ["activeTab", "tabs", "storage", "scripting", "offscreen", "alarms", "unlimitedStorage"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
@@ -17,7 +17,7 @@
       "js": ["spanish.js", "content.js"],
       "css": ["overlay.css"],
       "run_at": "document_idle",
-      "all_frames": false
+      "all_frames": true
     }
   ],
   "action": {

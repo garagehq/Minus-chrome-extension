@@ -29,6 +29,8 @@ const MUTE = [
   "Unable to add response to browser cache",
   "Some nodes were not assigned to the preferred execution providers",
   "CleanUnusedInitializersAndNodeArgs",
+  "Failed to get GPU adapter",       // flaky/absent WebGPU — we catch this and fall back to WASM
+  "wasm streaming compile failed",   // benign: ORT then instantiates from ArrayBuffer instead
 ];
 for (const level of ["log", "info", "warn", "error"]) {
   const orig = console[level].bind(console);
