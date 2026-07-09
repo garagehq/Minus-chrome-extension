@@ -8,23 +8,54 @@
 // the first generated position — the same decoder the training campaign used.
 
 import { AutoModelForImageTextToText, AutoProcessor, RawImage, env, ort } from "./dist/engine-lib.js";
+import { FALLBACK_CATALOG, parseCatalog, resolveModel, modelEnvFlags } from "./models_catalog.js";
 
 env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL("dist/");
 ort.env.wasm.wasmPaths = chrome.runtime.getURL("dist/");
 
+// Quiet the engine's startup noise. Models are packaged (chrome-extension://),
+// so the browser Cache API can't cache them anyway — disabling it removes the
+// "Failed to execute 'put' on 'Cache'" throw. logLevel trims ORT's chatter.
+env.useBrowserCache = false;
+ort.env.logLevel = "error";
+
+// A few loader warnings are emitted via console.* by ORT / transformers.js and
+// are benign for a packaged, local-only model. Filter exactly those strings so
+// the extension console stays clean without hiding real errors. (The WebGPU
+// "powerPreference ignored" line is emitted by Chromium itself, below the JS
+// console layer, so it can't be intercepted here — it's harmless.)
+const MUTE = [
+  "Unable to determine content-length",
+  "Unable to add response to browser cache",
+  "Some nodes were not assigned to the preferred execution providers",
+  "CleanUnusedInitializersAndNodeArgs",
+];
+for (const level of ["log", "info", "warn", "error"]) {
+  const orig = console[level].bind(console);
+  console[level] = (...args) => {
+    if (typeof args[0] === "string" && MUTE.some((m) => args[0].includes(m))) return;
+    orig(...args);
+  };
+}
+
 const PROMPT = "Is this an advertisement? Answer Yes or No.";
 const HUB_MODEL = "onnx-community/LFM2.5-VL-450M-ONNX";
-// engineKind -> packaged model dir. Default "lfm" = Iter 14: zero false
-// positives on web content (the safe "just works" default). "lfm-web" =
-// Iter 20-web: catches ~2.6x more web-display ads but false-positives on
-// product/book-cover imagery (learned product+text = ad from banner data) —
-// selectable for users who want aggressive web-ad blocking. Falls back to the
-// HF hub model if the chosen dir isn't packaged.
-// lfm (default) = Iter 21-web: catches web ads (72.7% clean-core) AND doesn't
-// false-positive product/book imagery (0.5% vs Iter 20-web's 60%). lfm-web
-// (Iter 20-web) kept selectable but superseded. lfm-iter14 = streaming-only.
-const LFM_MODELS = { lfm: "lfm-iter21web", "lfm-iter22": "lfm-iter22web", "lfm-web": "lfm-iter20web", "lfm-stream": "lfm-iter14" };
-const DEFAULT_LFM = "lfm-iter21web";
+
+// The engine catalog (key -> dir/kind/label) is loaded from the generated
+// models/index.json, which build_model_index.mjs regenerates from the packaged
+// model dirs. Adding a model dir therefore makes it selectable here and in the
+// popup with no code changes. Falls back to the built-in catalog if the index
+// is missing.
+let catalogPromise = null;
+function getCatalog() {
+  if (!catalogPromise) {
+    catalogPromise = fetch(chrome.runtime.getURL("models/index.json"))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((raw) => parseCatalog(raw || FALLBACK_CATALOG))
+      .catch(() => parseCatalog(FALLBACK_CATALOG));
+  }
+  return catalogPromise;
+}
 
 let enginePromise = null;
 let engineInfo = { state: "cold" };
@@ -53,16 +84,18 @@ async function warmUpWebGpu(tries = 6, delayMs = 1500) {
   return false;
 }
 
-async function loadEngine(engineKind = "lfm") {
-  const localDir = LFM_MODELS[engineKind] || DEFAULT_LFM;
+async function loadEngine(entry) {
+  const localDir = entry.dir;
   const useLocal = await localModelAvailable(localDir);
-  let modelId = HUB_MODEL;
-  if (useLocal) {
-    env.allowLocalModels = true; // browser builds default this to false
-    env.allowRemoteModels = false;
-    env.localModelPath = chrome.runtime.getURL("models/");
-    modelId = localDir;
-  }
+  // `env` is a shared singleton across engine loads. modelEnvFlags() returns
+  // BOTH flags on every load so switching engines can't inherit a prior local
+  // load's allowRemoteModels=false and then fail "file was not found locally"
+  // when the newly-selected model isn't packaged.
+  const flags = modelEnvFlags(useLocal);
+  env.allowLocalModels = flags.allowLocalModels;        // browser builds default this to false
+  env.localModelPath = chrome.runtime.getURL("models/");
+  env.allowRemoteModels = flags.allowRemoteModels;
+  const modelId = useLocal ? localDir : HUB_MODEL;
 
   // Validated combo (parity vs PyTorch: ad 0.999 / non-ad 0.031): 431MB total.
   const dtype = { vision_encoder: "q8", embed_tokens: "q8", decoder_model_merged: "q4" };
@@ -135,8 +168,9 @@ async function exists(url) {
 // SigLIP2-family engines (single ONNX graph, squash-384 preprocess):
 //   "siglip2" -> SO400M-384 web fine-tune (817MB, accurate)
 //   "lite"    -> ViT-B-16-384 (178MB fp16, for low-end / no-WebGPU machines)
-async function loadSiglip2Engine(engineKind = "siglip2") {
-  const dir = engineKind === "lite" ? "lite" : "siglip2";
+async function loadSiglip2Engine(entry) {
+  const dir = entry.dir;
+  const label = entry.label || dir;
   const base = chrome.runtime.getURL(`models/${dir}/`);
   const fp16 = `${base}model_fp16.onnx`;
   const fp32 = `${base}model.onnx`;
@@ -156,11 +190,11 @@ async function loadSiglip2Engine(engineKind = "siglip2") {
   for (const step of plan) {
     try {
       if (step.needWarmup && !(await warmUpWebGpu())) continue; // no adapter, skip GPU steps
-      engineInfo = { state: "loading", modelId: engineKind === "lite" ? "siglip2-b16-384-lite" : "siglip2-so400m-384", device: step.ep };
+      engineInfo = { state: "loading", modelId: label, device: step.ep };
       const session = await ort.InferenceSession.create(step.url, {
         executionProviders: [step.ep],
       });
-      engineInfo = { state: "ready", modelId: engineKind === "lite" ? "siglip2-b16-384-lite" : "siglip2-so400m-384", device: step.ep };
+      engineInfo = { state: "ready", modelId: label, device: step.ep };
       return { kind: "siglip2", session };
     } catch (e) {
       console.warn(`[minus] SigLIP2 on ${step.ep} failed, trying next:`, e);
@@ -192,24 +226,26 @@ async function siglip2Classify(engine, dataUrl) {
 }
 
 // engineKind is passed IN from the background worker — offscreen documents
-// do not reliably expose chrome.storage across Chrome builds.
-let loadedEngineKind = null;
-function getEngine(engineKind = "lfm") {
-  // Reload when the user switches engines in the popup (or on first load).
-  if (enginePromise && loadedEngineKind !== engineKind) {
+// do not reliably expose chrome.storage across Chrome builds. It's a catalog
+// KEY; we resolve it to a model entry (dir + kind) and reload when the resolved
+// model changes (popup engine switch, or first load).
+let loadedEngineKey = null;
+async function getEngine(engineKind = "lfm") {
+  const catalog = await getCatalog();
+  const entry = resolveModel(catalog, engineKind);
+  if (enginePromise && loadedEngineKey !== entry.key) {
     enginePromise = null;
     engineInfo = { state: "cold" };
   }
   if (!enginePromise) {
-    loadedEngineKind = engineKind;
-    enginePromise = (async () => {
-      return (engineKind === "siglip2" || engineKind === "lite") ? loadSiglip2Engine(engineKind) : loadEngine(engineKind);
-    })().catch((e) => {
-      enginePromise = null;
-      loadedEngineKind = null;
-      engineInfo = { state: "error", error: String(e) };
-      throw e;
-    });
+    loadedEngineKey = entry.key;
+    enginePromise = (async () => (entry.kind === "siglip2" ? loadSiglip2Engine(entry) : loadEngine(entry)))()
+      .catch((e) => {
+        enginePromise = null;
+        loadedEngineKey = null;
+        engineInfo = { state: "error", error: String(e) };
+        throw e;
+      });
   }
   return enginePromise;
 }

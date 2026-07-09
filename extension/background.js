@@ -154,25 +154,63 @@ chrome.alarms.onAlarm.addListener((a) => {
 
 
 // ---------------------------------------------------------------- context menu
+// Native menus can't take CSS, so "styling" here = a disabled wordmark header,
+// separators grouping the toggles, and clearer labels. IDs are unchanged so the
+// onClicked handler below still routes correctly.
 async function rebuildMenus() {
   const s = await getSettings();
   await chrome.contextMenus.removeAll();
   chrome.contextMenus.create({
-    id: "toggle-global", title: "Block ads", type: "checkbox",
+    id: "header", title: "◾ MINUS — vision ad blocker", enabled: false, contexts: ["action"],
+  });
+  chrome.contextMenus.create({ id: "sep-1", type: "separator", contexts: ["action"] });
+  chrome.contextMenus.create({
+    id: "toggle-global", title: "🛡  Block ads — all sites", type: "checkbox",
     checked: s.enabled, contexts: ["action"],
   });
   chrome.contextMenus.create({
-    id: "toggle-site", title: "Enabled on this site", type: "checkbox",
+    id: "toggle-site", title: "🌐  Block ads on this site", type: "checkbox",
     checked: true, contexts: ["action"],
   });
+  chrome.contextMenus.create({ id: "sep-2", type: "separator", contexts: ["action"] });
   chrome.contextMenus.create({
     id: "toggle-collect", type: "checkbox", checked: s.collectOptIn, contexts: ["action"],
-    title: "Contribute anonymous ad snapshots (opt-in)",
+    title: "📸  Contribute anonymous ad snapshots",
   });
 }
 
-chrome.runtime.onInstalled.addListener(rebuildMenus);
-chrome.runtime.onStartup?.addListener(rebuildMenus);
+function initActionStyle() {
+  chrome.action.setBadgeBackgroundColor({ color: "#3b82f6" });
+  chrome.action.setBadgeTextColor?.({ color: "#ffffff" });
+}
+
+chrome.runtime.onInstalled.addListener(() => { rebuildMenus(); initActionStyle(); });
+chrome.runtime.onStartup?.addListener(() => { rebuildMenus(); initActionStyle(); });
+initActionStyle();
+
+// ---------------------------------------------------------------- badge / icon
+// Toolbar icon is BLUE at rest and turns RED while ads are blocked on the tab,
+// with a per-tab counter badge (like a conventional ad blocker). The content
+// script reports its live blocked count; we paint the matching tab's action.
+const ICON_BLUE = { 16: "icons/m-blue-16.png", 32: "icons/m-blue-32.png", 48: "icons/m-blue-48.png", 128: "icons/m-blue-128.png" };
+const ICON_RED = { 16: "icons/m-red-16.png", 32: "icons/m-red-32.png", 48: "icons/m-red-48.png", 128: "icons/m-red-128.png" };
+const blockedByTab = new Map(); // tabId -> current blocked count
+
+async function paintAction(tabId, count) {
+  try {
+    await chrome.action.setIcon({ tabId, path: count > 0 ? ICON_RED : ICON_BLUE });
+    await chrome.action.setBadgeText({ tabId, text: count > 0 ? String(count) : "" });
+  } catch { /* tab gone / not paintable (e.g. chrome:// pages) */ }
+}
+
+// Reset the counter when a tab navigates so the badge reflects the current page.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading") {
+    blockedByTab.set(tabId, 0);
+    paintAction(tabId, 0);
+  }
+});
+chrome.tabs.onRemoved.addListener((tabId) => blockedByTab.delete(tabId));
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const s = await getSettings();
@@ -281,6 +319,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             enabled: settings.enabled && !settings.disabledSites.includes(host),
           },
         });
+      } else if (msg.type === "minus:blocked") {
+        const tabId = sender.tab?.id;
+        if (tabId != null) {
+          const count = Math.max(0, msg.count | 0);
+          blockedByTab.set(tabId, count);
+          paintAction(tabId, count);
+        }
+        sendResponse({ ok: true });
       } else if (msg.type === "minus:queue-sample") {
         const { collectOptIn } = await getSettings();
         if (collectOptIn) await queueSample(msg.sample);

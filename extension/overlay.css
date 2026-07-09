@@ -78,3 +78,10 @@
 [data-minus-overlay].minus-compact .minus-ex,
 [data-minus-overlay].minus-compact .minus-brand { display: none; }
 [data-minus-overlay].minus-compact { gap: 1px; padding: 4px; }
+
+/* When a foreign layer (modal / lightbox / secondary overlay) is painted over
+   the ad region, the card steps aside so that layer is fully visible and
+   clickable. visibility:hidden also drops it from hit-testing and pointer
+   events, so clicks fall through to the layer underneath. Restored the moment
+   the covering layer goes away (see updateOcclusion in content.js). */
+[data-minus-overlay].minus-occluded { visibility: hidden; }

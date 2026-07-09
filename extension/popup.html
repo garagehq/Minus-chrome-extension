@@ -1,22 +1,42 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="utf-8">
   <style>
-    body { width: 260px; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-           background: #101418; color: #f2f5f7; margin: 0; padding: 14px; }
-    h1 { font-size: 15px; margin: 0 0 10px; color: #5ad1a5; letter-spacing: 0.08em; }
+    @font-face {
+      font-family: "VT323";
+      src: url("VT323.woff2") format("woff2");
+      font-display: swap;
+    }
+    :root { --blue: #3b82f6; --ink: #f2f5f7; --panel: #1c2530; --line: #2c3945; }
+    body { width: 264px; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+           background: #101418; color: var(--ink); margin: 0; padding: 14px; }
+
+    /* Retro-terminal wordmark: capital M tile + "minus", VT323, blue on black. */
+    .brand { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; }
+    .brand .tile { width: 34px; height: 34px; background: #000; border-radius: 7px;
+           display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+    .brand .tile span { font-family: "VT323", monospace; font-size: 34px; line-height: 1;
+           color: var(--blue); margin-top: 2px; }
+    .brand .word { font-family: "VT323", monospace; font-size: 30px; line-height: 1;
+           color: var(--blue); letter-spacing: 0.04em; }
+
     label { display: block; font-size: 12px; margin: 10px 0 3px; opacity: 0.8; }
-    input[type="text"] { width: 100%; box-sizing: border-box; background: #1c2530;
-           border: 1px solid #2c3945; color: #f2f5f7; border-radius: 4px; padding: 5px; }
-    .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-    #status { font-size: 11px; margin-top: 12px; opacity: 0.75; min-height: 14px; }
-    #bar { display: none; height: 6px; background: #1c2530; border-radius: 3px;
+    input[type="text"], select { width: 100%; box-sizing: border-box; background: var(--panel);
+           border: 1px solid var(--line); color: var(--ink); border-radius: 4px; padding: 5px; }
+    .row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+    #status { font-size: 11px; margin-top: 12px; opacity: 0.75; min-height: 14px;
+           font-family: "VT323", monospace; letter-spacing: 0.02em; font-size: 13px; }
+    #bar { display: none; height: 6px; background: var(--panel); border-radius: 3px;
            margin-top: 6px; overflow: hidden; }
-    #bar > div { height: 100%; width: 0; background: #5ad1a5; transition: width .3s; }
+    #bar > div { height: 100%; width: 0; background: var(--blue); transition: width .3s; }
   </style>
 </head>
 <body>
-  <h1>minus</h1>
+  <div class="brand">
+    <div class="tile"><span>M</span></div>
+    <div class="word">minus</div>
+  </div>
   <div class="row">
     <input type="checkbox" id="enabled">
     <label for="enabled" style="margin:0">Block ads</label>
@@ -24,9 +44,11 @@
   <label for="threshold">Ad threshold (0–1)</label>
   <input type="text" id="threshold">
   <label for="engineKind">Engine</label>
-  <select id="engineKind" style="width:100%;background:#1c2530;border:1px solid #2c3945;color:#f2f5f7;border-radius:4px;padding:5px">
-    <option value="lfm">LFM Iter 14 (safe — no content false-positives)</option>
+  <select id="engineKind">
+    <option value="lfm">LFM Iter 21-web (default — web ads, no content false-positives)</option>
+    <option value="lfm-iter22">LFM Iter 22-web (experimental — higher web-ad recall)</option>
     <option value="lfm-web">LFM Iter 20-web (aggressive web-ad blocking)</option>
+    <option value="lfm-stream">LFM Iter 14 (streaming-only)</option>
     <option value="siglip2">SigLIP2-384 (fast)</option>
     <option value="lite">Lite B/16 (low-end / no-WebGPU, 178MB)</option>
   </select>

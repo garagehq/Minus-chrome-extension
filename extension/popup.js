@@ -28,10 +28,32 @@ async function refreshStatus() {
   }
 }
 
+// Populate the engine dropdown from the generated catalog so newly-packaged
+// models appear with no code changes. Leaves the static <option>s (offline
+// fallback) in place if the index can't be read.
+async function loadEngineOptions() {
+  const sel = document.getElementById("engineKind");
+  try {
+    const r = await fetch(chrome.runtime.getURL("models/index.json"));
+    if (!r.ok) return;
+    const models = (await r.json())?.models;
+    if (!Array.isArray(models) || !models.length) return;
+    sel.innerHTML = "";
+    for (const m of models) {
+      if (!m?.key) continue;
+      const o = document.createElement("option");
+      o.value = m.key;
+      o.textContent = m.label || m.key;
+      sel.appendChild(o);
+    }
+  } catch { /* keep static fallback options */ }
+}
+
 async function load() {
   const s = { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) };
   document.getElementById("enabled").checked = s.enabled;
   document.getElementById("threshold").value = s.threshold;
+  await loadEngineOptions();
   document.getElementById("engineKind").value = s.engineKind;
   refreshStatus();
   setInterval(refreshStatus, 1500);

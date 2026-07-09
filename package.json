@@ -7,7 +7,9 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "bash tests/run_regression.sh",
+    "build": "node build.mjs",
+    "build:models": "node build_model_index.mjs"
   },
   "repository": {
     "type": "git",

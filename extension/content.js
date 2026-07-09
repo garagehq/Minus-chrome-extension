@@ -54,6 +54,17 @@
   const videoState = new WeakMap();        // video -> {adVotes, nonAdVotes, blocked}
   let scanTimer = null;
   let scanning = false;
+  let lastReported = -1;
+
+  // Tell the background the live count of ads currently covered on this page so
+  // it can drive the toolbar badge (and flip the icon blue->red). Only fires on
+  // change to avoid chattering the service worker.
+  function reportBlocked() {
+    const n = overlays.size;
+    if (n === lastReported) return;
+    lastReported = n;
+    try { chrome.runtime.sendMessage({ type: "minus:blocked", count: n }); } catch {}
+  }
 
   chrome.runtime.sendMessage({ type: "minus:settings" }, (resp) => {
     if (resp?.ok) {
@@ -331,6 +342,7 @@
       allowed.add(el);
       div.remove();
       overlays.delete(el);
+      reportBlocked();
       // user said "show it" -> retract any queued contribution for this element
       const key = sampleKeys.get(el);
       if (key) chrome.runtime.sendMessage({ type: "minus:retract-sample", key });
@@ -338,6 +350,7 @@
     document.documentElement.appendChild(div);
     overlays.set(el, div);
     positionOverlay(el, div);
+    reportBlocked();
   }
 
   function positionOverlay(el, div) {
@@ -345,6 +358,7 @@
     if (rect.width < 4 || rect.height < 4 || !el.isConnected) {
       div.remove();
       overlays.delete(el);
+      reportBlocked();
       return;
     }
     Object.assign(div.style, {
@@ -355,8 +369,120 @@
   }
 
   function trackOverlays() {
-    for (const [el, div] of overlays) positionOverlay(el, div);
+    const now = performance.now();
+    const checkOcclusion = now - lastOcclusionCheck >= OCCLUSION_MS;
+    if (checkOcclusion) lastOcclusionCheck = now;
+    for (const [el, div] of overlays) {
+      positionOverlay(el, div);
+      // positionOverlay may have removed a detached overlay mid-iteration.
+      if (checkOcclusion && overlays.has(el)) updateOcclusion(el, div);
+    }
     requestAnimationFrame(trackOverlays);
+  }
+
+  // ---------------------------------------------------------------- occlusion
+  // A card sits above its ad at (near) max z-index. If the page later opens a
+  // modal / lightbox / secondary overlay over that region, the card must step
+  // aside instead of covering it. Each throttled tick we ask what element is
+  // actually painted on top of the ad; if it's something foreign, we hide the
+  // card (and restore it once that layer goes away). This is z-index-agnostic:
+  // it works even when the ad or the modal uses an arbitrary stacking value.
+  const OCCLUSION_MS = 150;
+  let lastOcclusionCheck = 0;
+
+  // Deepest element painted at a viewport point, descending through open shadow
+  // roots (ad slots — and the modals that cover them — often live in shadow DOM,
+  // and Node.contains / a plain elementFromPoint won't cross those boundaries).
+  function topmostAt(x, y) {
+    let hit = document.elementFromPoint(x, y);
+    while (hit && hit.shadowRoot) {
+      const inner = hit.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === hit) break;
+      hit = inner;
+    }
+    return hit;
+  }
+
+  // Probe points inside the ad rect, clamped to the viewport (center first so
+  // it carries the vote when the ad is partially scrolled off-screen).
+  function occlusionSamples(rect) {
+    const fx = [0.5, 0.3, 0.7, 0.3, 0.7], fy = [0.5, 0.3, 0.3, 0.7, 0.7];
+    const pts = [];
+    for (let i = 0; i < fx.length; i++) {
+      const x = rect.left + rect.width * fx[i];
+      const y = rect.top + rect.height * fy[i];
+      if (x >= 1 && x < innerWidth - 1 && y >= 1 && y < innerHeight - 1) pts.push([x, y]);
+    }
+    return pts;
+  }
+
+  // The screen rect of the region where a foreign element (not this ad, not one
+  // of our own cards) is painted over the ad — or null if nothing covers it.
+  // Momentarily drops the card's own pointer-events so elementFromPoint reports
+  // what is *underneath* it. Returns the union of the covering elements' rects,
+  // intersected with the ad, so a modal that clips only a corner yields only a
+  // corner (a full-screen modal/backdrop yields the whole card).
+  function foreignCoverRect(el, div) {
+    const rect = el.getBoundingClientRect();
+    const pts = occlusionSamples(rect);
+    if (!pts.length) return null;
+    const prevPE = div.style.pointerEvents;
+    div.style.pointerEvents = "none";                    // synchronous window; no click can interleave
+    const foreign = new Set();
+    for (const [x, y] of pts) {
+      const hit = topmostAt(x, y);
+      if (!hit) continue;
+      if (hit === el || el.contains(hit) || hit.contains(el)) continue; // the ad itself / its wrapper / its content
+      if (hit.closest?.("[data-minus-overlay]")) continue;              // another one of our cards
+      foreign.add(hit);
+    }
+    div.style.pointerEvents = prevPE;
+    if (!foreign.size) return null;
+    let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity;
+    for (const f of foreign) {
+      const fr = f.getBoundingClientRect();
+      l = Math.min(l, fr.left); t = Math.min(t, fr.top);
+      r = Math.max(r, fr.right); b = Math.max(b, fr.bottom);
+    }
+    const il = Math.max(rect.left, l), it = Math.max(rect.top, t);
+    const ir = Math.min(rect.right, r), ib = Math.min(rect.bottom, b);
+    if (ir <= il || ib <= it) return null;               // union doesn't actually overlap the ad
+    return { adRect: rect, left: il, top: it, right: ir, bottom: ib };
+  }
+
+  // Reconcile the card with whatever now covers its ad:
+  //  - nothing            -> full card, no clip
+  //  - covered edge-to-edge -> hide entirely (.minus-occluded)
+  //  - covered in part    -> punch that sub-rect out of the card with an
+  //                          evenodd clip-path hole, so the covering layer is
+  //                          both visible and clickable there while the rest of
+  //                          the ad stays covered.
+  function updateOcclusion(el, div) {
+    const c = foreignCoverRect(el, div);
+    let hide = false, clip = "";
+    if (c) {
+      const A = c.adRect, W = A.width, H = A.height, eps = 2;
+      const x0 = Math.max(0, c.left - A.left), y0 = Math.max(0, c.top - A.top);
+      const x1 = Math.min(W, c.right - A.left), y1 = Math.min(H, c.bottom - A.top);
+      if (x0 <= eps && y0 <= eps && x1 >= W - eps && y1 >= H - eps) {
+        hide = true;                                     // covered corner-to-corner: yield the whole card
+      } else {
+        const f = (n) => Math.round(n * 100) / 100;
+        clip = `path(evenodd, 'M0 0H${f(W)}V${f(H)}H0Z M${f(x0)} ${f(y0)}H${f(x1)}V${f(y1)}H${f(x0)}Z')`;
+      }
+    }
+    applyOcclusion(div, hide, clip);
+  }
+
+  function applyOcclusion(div, hide, clip) {
+    if ((div.dataset.minusHidden === "1") !== hide) {
+      div.dataset.minusHidden = hide ? "1" : "0";
+      div.classList.toggle("minus-occluded", hide);
+    }
+    if (div.dataset.minusClip !== clip) {                // hidden state clears the clip (clip === "")
+      div.style.clipPath = clip;
+      div.dataset.minusClip = clip;
+    }
   }
 
   // ---------------------------------------------------------------- video
@@ -424,6 +550,7 @@
         st.blocked = false;
         overlays.get(v)?.remove();
         overlays.delete(v);
+        reportBlocked();
       }
       videoState.set(v, st);
     });

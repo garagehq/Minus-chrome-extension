@@ -1,9 +1,10 @@
 // Build the self-contained inference bundle used by both the extension and
 // the test pages: dist/engine-lib.js + the ONNX Runtime wasm/mjs assets.
 import { build } from "esbuild";
-import { cpSync, mkdirSync, readdirSync } from "fs";
+import { cpSync, mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { buildIndex } from "./build_model_index.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = join(HERE, "extension", "dist");
@@ -31,3 +32,12 @@ for (const f of readdirSync(ORT_DIST)) {
   }
 }
 console.log(`copied ${copied} ORT runtime assets -> ${OUT}`);
+
+// Regenerate the model catalog so newly-packaged models are auto-discovered by
+// the popup dropdown and the offscreen loader.
+const MODELS_DIR = join(HERE, "extension", "models");
+const INDEX = join(MODELS_DIR, "index.json");
+const prevIndex = existsSync(INDEX) ? JSON.parse(readFileSync(INDEX, "utf8")) : undefined;
+const modelIndex = buildIndex(MODELS_DIR, prevIndex);
+writeFileSync(INDEX, JSON.stringify(modelIndex, null, 2) + "\n");
+console.log(`model index -> ${modelIndex.models.length} models (default: ${modelIndex.default})`);
