@@ -13,7 +13,10 @@
   const SCAN_DEBOUNCE_MS = 700;
   const VIDEO_SAMPLE_MS = 2500;
   const VIDEO_HYSTERESIS = 2;              // consecutive verdicts to flip state
-  const AD_HINT = /(^|[-_\b])(ad|ads|advert|advertisement|adsense|sponsor|sponsored|promo|banner|dbl|doubleclick|taboola|outbrain)([-_\b]|$)/i;
+  // Boundary = any non-alphanumeric (so "ad-slot", "slot-ad", "box ad", "/ad/"
+  // all match, but "gradient"/"shadow"/"download" don't). The old [-_\b] set
+  // excluded whitespace, so an id ending in "-ad" (e.g. "shadow-ad") missed.
+  const AD_HINT = /(^|[^a-z0-9])(ad|ads|advert|advertisement|adsense|sponsor|sponsored|promo|banner|dbl|doubleclick|taboola|outbrain)([^a-z0-9]|$)/i;
   // Shape gates so we only ever crop a *single ad slot*, never a content
   // column / hero / page section. Standard IAB units fit inside these; the
   // failure mode was giant containers (e.g. 710×3555 article grids) whose
