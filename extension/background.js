@@ -289,6 +289,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           paintAction(tabId, total);
         }
         sendResponse({ ok: true });
+      } else if (msg.type === "minus:blocked-count") {
+        const frames = blockedByTab.get(msg.tabId);
+        let count = 0;
+        if (frames) for (const c of frames.values()) count += c;
+        sendResponse({ ok: true, count });
       } else if (msg.type === "minus:queue-sample") {
         const { collectOptIn } = await getSettings();
         if (collectOptIn) await queueSample(msg.sample);

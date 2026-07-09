@@ -8,44 +8,56 @@
       src: url("VT323.ttf") format("truetype");
       font-display: block;
     }
-    :root { --blue: #3b82f6; --blue-dim: #2b6fd6; --ink: #cfe6ff; --panel: #0e1621; --line: #24425f; }
+    :root { --blue: #3b82f6; --ink: #cfe6ff; --panel: #0e1621; --line: #24425f; --muted: #6f8bab; }
     * { box-sizing: border-box; }
     body {
-      width: 270px; margin: 0; padding: 16px 16px 18px;
+      width: 290px; margin: 0; padding: 20px 20px 16px;
       background: #070b10; color: var(--ink);
       font-family: "VT323", ui-monospace, monospace; font-size: 17px;
       position: relative; overflow: hidden;
     }
-    /* CRT scanlines */
     body::after {
       content: ""; position: absolute; inset: 0; pointer-events: none;
       background: repeating-linear-gradient(0deg, rgba(0,0,0,0.16) 0 1px, transparent 1px 3px);
       mix-blend-mode: multiply;
     }
 
-    .brand { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; }
-    .brand .tile { width: 36px; height: 36px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
-    .brand .tile span { font-family: "VT323", monospace; font-size: 40px; line-height: 1; color: var(--blue);
-      text-shadow: 0 0 10px rgba(59,130,246,0.7); }
-    .brand .word { font-family: "VT323", monospace; font-size: 40px; line-height: 1; color: var(--blue);
-      letter-spacing: 0.06em; text-shadow: 0 0 10px rgba(59,130,246,0.55); }
+    .brand { text-align: center; margin: 2px 0 18px; }
+    .brand .word { font-family: "VT323", monospace; font-size: 46px; line-height: 1; color: var(--blue);
+      letter-spacing: 0.08em; text-shadow: 0 0 12px rgba(59,130,246,0.55); }
 
-    label { display: block; font-size: 16px; margin: 12px 0 2px; letter-spacing: 0.08em;
+    /* Per-page blocked counter */
+    .stat { display: flex; align-items: baseline; justify-content: center; gap: 10px;
+      padding: 12px 0 16px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+    .stat .num { font-family: "VT323", monospace; font-size: 40px; line-height: 1; color: var(--blue);
+      text-shadow: 0 0 12px rgba(59,130,246,0.6); }
+    .stat .statlabel { font-size: 16px; color: var(--muted); letter-spacing: 0.04em; max-width: 150px; }
+
+    /* Controls: generous vertical rhythm */
+    .row { display: flex; align-items: center; gap: 12px; padding: 9px 0; }
+    .row .rl { font-size: 18px; letter-spacing: 0.03em; color: var(--ink); cursor: pointer; }
+    .toggle-switch input:disabled ~ .rl { color: var(--muted); }
+
+    label.field { display: block; font-size: 16px; margin: 16px 0 5px; letter-spacing: 0.08em;
       text-transform: uppercase; color: #7fb0e6; }
     input[type="text"], select {
       width: 100%; background: var(--panel); border: 1px solid var(--line); color: var(--ink);
-      border-radius: 3px; padding: 5px 7px; font-family: "VT323", monospace; font-size: 17px;
+      border-radius: 3px; padding: 7px 8px; font-family: "VT323", monospace; font-size: 17px;
     }
     select { cursor: pointer; }
-    .row { display: flex; align-items: center; gap: 9px; margin-top: 6px; }
-    .row label { margin: 0; text-transform: none; letter-spacing: 0.04em; font-size: 18px; color: var(--ink); }
     input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--blue); cursor: pointer; }
 
-    #status { font-size: 16px; margin-top: 14px; min-height: 15px; letter-spacing: 0.03em; color: #6fd39a; }
+    #status { font-size: 16px; margin-top: 16px; min-height: 15px; letter-spacing: 0.03em; color: #6fd39a; }
     #status::before { content: "> "; color: var(--blue); }
     #bar { display: none; height: 6px; background: var(--panel); border: 1px solid var(--line);
       border-radius: 3px; margin-top: 8px; overflow: hidden; }
     #bar > div { height: 100%; width: 0; background: var(--blue); box-shadow: 0 0 8px var(--blue); transition: width .3s; }
+
+    .foot { display: flex; justify-content: space-between; align-items: center;
+      margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line);
+      font-size: 15px; color: var(--muted); letter-spacing: 0.04em; }
+    .foot a { color: var(--muted); text-decoration: none; }
+    .foot a:hover { color: var(--blue); }
 
     /* Square sliding toggle (ported from garagehq/Minus), blue accent + glow. */
     .toggle-switch { position: relative; display: inline-block; width: 46px; height: 22px; flex: 0 0 auto; }
@@ -58,15 +70,16 @@
     .toggle-switch input:checked + .toggle-slider::before { transform: translateX(26px);
       background: var(--blue); box-shadow: 0 0 10px var(--blue); }
     .toggle-switch input:disabled + .toggle-slider { opacity: 0.4; cursor: not-allowed; }
-    .row .rl { font-size: 18px; letter-spacing: 0.03em; color: var(--ink); cursor: pointer; }
-    .toggle-switch input:disabled ~ .rl { color: var(--text-muted); }
   </style>
 </head>
 <body>
-  <div class="brand">
-    <div class="tile"><span>M</span></div>
-    <div class="word">minus</div>
+  <div class="brand"><span class="word">Minus</span></div>
+
+  <div class="stat">
+    <span class="num" id="blockedCount">0</span>
+    <span class="statlabel">ads blocked on this page</span>
   </div>
+
   <div class="row">
     <label class="toggle-switch"><input type="checkbox" id="enabled"><span class="toggle-slider"></span></label>
     <label for="enabled" class="rl">Block ads (all sites)</label>
@@ -79,9 +92,10 @@
     <label class="toggle-switch"><input type="checkbox" id="collect"><span class="toggle-slider"></span></label>
     <label for="collect" class="rl">Contribute anonymous ad snapshots</label>
   </div>
-  <label for="threshold">Ad threshold (0–1)</label>
+
+  <label class="field" for="threshold">Ad threshold (0–1)</label>
   <input type="text" id="threshold">
-  <label for="engineKind">Engine</label>
+  <label class="field" for="engineKind">Engine</label>
   <select id="engineKind">
     <option value="lfm">LFM Iter 21-web (default — web ads, no content false-positives)</option>
     <option value="lfm-iter22">LFM Iter 22-web (experimental — higher web-ad recall)</option>
@@ -90,8 +104,14 @@
     <option value="siglip2">SigLIP2-384 (fast)</option>
     <option value="lite">Lite B/16 (low-end / no-WebGPU, 178MB)</option>
   </select>
+
   <div id="status"></div>
   <div id="bar"><div></div></div>
+
+  <div class="foot">
+    <span id="ver">Minus</span>
+    <a id="repo" href="https://github.com/garagehq/Minus-chrome-extension" target="_blank" rel="noopener">source ↗</a>
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>

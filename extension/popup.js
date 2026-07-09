@@ -1,18 +1,26 @@
 const DEFAULTS = { threshold: 0.5, enabled: true, engineKind: "lfm", disabledSites: [], collectOptIn: false };
 
 let currentHost = "";
+let currentTabId = null;
 
 function ask(msg) {
   return new Promise((resolve) => chrome.runtime.sendMessage(msg, resolve));
 }
 
-async function activeHost() {
+async function activeTab() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    return tab?.url && tab.url.startsWith("http") ? new URL(tab.url).hostname : "";
+    return tab || null;
   } catch {
-    return "";
+    return null;
   }
+}
+
+// Live count of ads blocked on the current tab (matches the toolbar badge).
+async function refreshCount() {
+  if (currentTabId == null) return;
+  const r = await ask({ type: "minus:blocked-count", tabId: currentTabId });
+  document.getElementById("blockedCount").textContent = String(r?.count ?? 0);
 }
 
 async function refreshStatus() {
@@ -68,7 +76,9 @@ async function load() {
   await loadEngineOptions();
   document.getElementById("engineKind").value = s.engineKind;
 
-  currentHost = await activeHost();
+  const tab = await activeTab();
+  currentTabId = tab?.id ?? null;
+  currentHost = tab?.url && tab.url.startsWith("http") ? new URL(tab.url).hostname : "";
   const site = document.getElementById("siteEnabled");
   const siteLabel = document.getElementById("siteLabel");
   if (currentHost) {
@@ -81,8 +91,11 @@ async function load() {
     siteLabel.textContent = "Block on this site (n/a)";
   }
 
+  document.getElementById("ver").textContent = "v" + chrome.runtime.getManifest().version;
+
   refreshStatus();
-  setInterval(refreshStatus, 1500);
+  refreshCount();
+  setInterval(() => { refreshStatus(); refreshCount(); }, 1500);
 }
 
 async function saveGeneral() {

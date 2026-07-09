@@ -30,15 +30,28 @@ const MUTE = [
   "Some nodes were not assigned to the preferred execution providers",
   "CleanUnusedInitializersAndNodeArgs",
   "Failed to get GPU adapter",       // flaky/absent WebGPU — we catch this and fall back to WASM
+  "WebGPU is not supported",
+  "no available backend",
   "wasm streaming compile failed",   // benign: ORT then instantiates from ArrayBuffer instead
 ];
+const muteText = (a) => (typeof a === "string" ? a : String(a?.message || ""));
 for (const level of ["log", "info", "warn", "error"]) {
   const orig = console[level].bind(console);
   console[level] = (...args) => {
-    if (typeof args[0] === "string" && MUTE.some((m) => args[0].includes(m))) return;
+    if (args.some((a) => MUTE.some((m) => muteText(a).includes(m)))) return; // match string OR Error.message, any arg
     orig(...args);
   };
 }
+
+// WebGPU can be *present but non-functional* (flaky adapter / driver). We try
+// it, catch the failure, and fall back to WASM — but ORT can surface the
+// adapter error as an uncaught rejection with a scary stack. Swallow those
+// known-benign engine errors so they don't alarm users; the WASM fallback keeps
+// the extension fully working.
+const benignEngineError = (r) =>
+  /Failed to get GPU adapter|WebGPU is not supported|no available backend|requestAdapter|requestDevice/i.test(String(r?.message || r || ""));
+self.addEventListener("unhandledrejection", (e) => { if (benignEngineError(e.reason)) e.preventDefault(); });
+self.addEventListener("error", (e) => { if (benignEngineError(e.error || e.message)) e.preventDefault(); });
 
 const PROMPT = "Is this an advertisement? Answer Yes or No.";
 const HUB_MODEL = "onnx-community/LFM2.5-VL-450M-ONNX";
@@ -71,19 +84,33 @@ async function localModelAvailable(dir) {
   }
 }
 
-// The first requestAdapter() of a session can fail while the browser's GPU
-// service spins up (seen on NVIDIA Tegra; harmless elsewhere). Warm it up so
-// ORT's own single attempt doesn't land on the flake and dump us to WASM.
-async function warmUpWebGpu(tries = 6, delayMs = 1500) {
+// Decide whether WebGPU is *actually usable* before we ask ORT to build a
+// WebGPU session. Requesting an adapter isn't enough — WebGPU can be present
+// but non-functional, so we also request a full GPUDevice (which is what ORT
+// needs). If we can't get a device, we go straight to WASM and never trigger
+// ORT's "Failed to get GPU adapter" throw. Retries cover a GPU service that's
+// still spinning up (seen on NVIDIA Tegra).
+async function warmUpWebGpu(tries = 5, delayMs = 1200) {
   if (!navigator.gpu) return false;
   for (let i = 0; i < tries; i++) {
     try {
       const adapter = await navigator.gpu.requestAdapter();
-      if (adapter) return true;
+      const device = adapter && await adapter.requestDevice();
+      if (device) { device.destroy?.(); return true; }
     } catch {}
     await new Promise((r) => setTimeout(r, delayMs));
   }
   return false;
+}
+
+// Reject if `promise` doesn't settle within `ms`. Used to bound WebGPU model
+// load + warm-up, which can HANG (not throw) on flaky GPU drivers — without a
+// bound the engine sticks in "loading" forever and never falls back to WASM.
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)),
+  ]);
 }
 
 async function loadEngine(entry) {
@@ -116,13 +143,19 @@ async function loadEngine(entry) {
   };
 
   const processor = await AutoProcessor.from_pretrained(modelId, { progress_callback });
+  const buildModel = (dev) => withTimeout(
+    AutoModelForImageTextToText.from_pretrained(modelId, { device: dev, dtype, progress_callback }),
+    dev === "webgpu" ? 150000 : 300000, `${dev} model load`);
+
   let model;
   try {
-    model = await AutoModelForImageTextToText.from_pretrained(modelId, { device, dtype, progress_callback });
+    model = await buildModel(device);
   } catch (e) {
-    console.warn("[minus] WebGPU load failed, falling back to WASM:", e);
+    if (device === "wasm") throw e;
+    console.info(`[minus] ${device} model load failed; using WASM.`); // no error obj -> no scary stack
     device = "wasm";
-    model = await AutoModelForImageTextToText.from_pretrained(modelId, { device, dtype, progress_callback });
+    engineInfo = { ...engineInfo, device, state: "loading" };
+    model = await buildModel("wasm");
   }
 
   const tok = processor.tokenizer;
@@ -133,20 +166,30 @@ async function loadEngine(entry) {
 
   const engine = { model, processor, yesIds, noIds };
 
-  // Warm-up inference on a dummy image: shader compilation / first-run JIT
-  // lands here instead of on the first real page scan.
-  try {
+  // Warm-up on a dummy image (shader compilation / first-run JIT lands here, not
+  // on the first real scan) — AND doubles as a health check: if the GPU
+  // inference path hangs/errors, rebuild on WASM instead of shipping a dead
+  // engine that would hang every real classify call. Bounded so it can never
+  // wedge the "ready" transition.
+  async function warmUp(eng) {
     const canvas = new OffscreenCanvas(64, 64);
     canvas.getContext("2d").fillRect(0, 0, 64, 64);
     const blob = await canvas.convertToBlob({ type: "image/png" });
-    const url = await new Promise((r) => {
-      const fr = new FileReader();
-      fr.onload = () => r(fr.result);
-      fr.readAsDataURL(blob);
-    });
-    await classifyOne(engine, url);
+    const url = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+    await classifyOne(eng, url);
+  }
+  try {
+    await withTimeout(warmUp(engine), 60000, `${device} warm-up`);
   } catch (e) {
-    console.warn("[minus] warm-up inference failed (continuing):", e);
+    if (device !== "wasm") {
+      console.info(`[minus] ${device} inference failed; rebuilding on WASM.`); // no error obj
+      device = "wasm";
+      engineInfo = { ...engineInfo, device, state: "loading" };
+      engine.model = await buildModel("wasm");
+      try { await withTimeout(warmUp(engine), 60000, "wasm warm-up"); } catch (e2) { console.warn("[minus] WASM warm-up failed (continuing):", e2); }
+    } else {
+      console.warn("[minus] WASM warm-up failed (continuing):", e);
+    }
   }
 
   engineInfo = { state: "ready", modelId, device };
@@ -245,7 +288,17 @@ async function getEngine(engineKind = "lfm") {
       .catch((e) => {
         enginePromise = null;
         loadedEngineKey = null;
-        engineInfo = { state: "error", error: String(e) };
+        // The quantized LFM model uses GatherBlockQuantized, which ORT's WASM
+        // backend can't run — so on a machine without working WebGPU the session
+        // fails to create. Turn that cryptic ORT error into clear guidance.
+        const s = String(e);
+        const needsGpu = /GatherBlockQuantized|Could not find an implementation|Can't create a session/i.test(s);
+        engineInfo = {
+          state: "error",
+          error: needsGpu
+            ? "This engine needs WebGPU, which isn't available. Enable it in your browser (chrome://flags → “Unsafe WebGPU”) and reload."
+            : s,
+        };
         throw e;
       });
   }
