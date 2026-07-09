@@ -34,7 +34,7 @@ async function watch(page, url, getVideoFrame, getOverlayCount, shot) {
   return { covered, coveredT, sawProgram };
 }
 
-const childFrame = (page, needle) => page.frames().find((f) => f.url().includes(needle));
+const childFrame = (page, needle) => page.frames().find((f) => f !== page.mainFrame() && f.url().includes(needle));
 
 try {
   console.log("loading engine…");
