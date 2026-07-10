@@ -35,6 +35,13 @@
     .step .hint { color: var(--muted); font-size: 18px; }
     .pin { color: var(--blue); }
 
+    /* Real screenshots showing which control to click. */
+    .shot { display: block; margin: 14px 0 5px; max-width: 100%; border: 1px solid var(--line);
+      border-radius: 5px; box-shadow: 0 3px 16px rgba(0,0,0,0.55); }
+    .shot-narrow { width: 240px; }
+    .shotcap { color: var(--muted); font-size: 16px; letter-spacing: 0.03em; margin: 0; }
+    .shotcap b { color: #ffdd00; }
+
     .note { margin-top: 22px; padding: 14px 16px; border: 1px dashed var(--line); background: var(--panel);
       color: var(--muted); font-size: 18px; }
     .note b { color: #6fd39a; }
@@ -69,8 +76,10 @@
       <div class="n">1</div>
       <div>
         <h3>Pin Minus to your toolbar</h3>
-        <p>Click the <span class="pin">🧩 puzzle-piece</span> icon at the top-right of your browser, then click the <span class="pin">📌 pin</span> next to <b>Minus</b>.</p>
-        <p class="hint">Chrome can't pin an extension for you — one click keeps Minus one click away. You'll see a small <b>M</b> icon: <span class="pin">blue</span> at rest, <span style="color:#ff6b6b">red</span> while it's blocking.</p>
+        <p>Click the <span class="pin">🧩 puzzle-piece</span> icon at the top-right of your browser (<b>①</b>), then click the <span class="pin">📌 pin</span> next to <b>Minus</b> (<b>②</b>).</p>
+        <img class="shot" src="onboarding/pin.png" alt="The Chrome Extensions menu open, with the puzzle-piece icon and the pin next to Minus circled">
+        <p class="shotcap"><b>①</b> open the Extensions (🧩) menu &nbsp;→&nbsp; <b>②</b> click the pin beside Minus</p>
+        <p class="hint">Chrome can't pin an extension for you — one click keeps Minus one click away. Once pinned you'll see a small <b>M</b> icon: <span class="pin">blue</span> at rest, <span style="color:#ff6b6b">red</span> while it's blocking.</p>
       </div>
     </div>
 
@@ -96,7 +105,9 @@
       <div>
         <h3>Optional: help Minus get smarter</h3>
         <p>Minus improves when it sees the ads it misses (and the things it shouldn't cover). You can opt in to send <b>anonymous</b> snapshots:</p>
-        <p class="hint">Click the Minus icon → turn on <b>“Contribute anonymous ad snapshots.”</b> It's <b>off by default</b>. When on, Minus sends only the <b>cropped image</b> of a detected ad plus its <b>hostname</b> — no page content, no browsing history, no identity. Clicking ✕ on an overlay retracts that snapshot before it's ever sent, and there's a 10-minute local cool-down.</p>
+        <p class="hint">Click the Minus icon → turn on <b>“Contribute anonymous ad snapshots”</b> (circled below). It's <b>off by default</b>. When on, Minus sends only the <b>cropped image</b> of a detected ad plus its <b>hostname</b> — no page content, no browsing history, no identity. Clicking ✕ on an overlay retracts that snapshot before it's ever sent, and there's a 10-minute local cool-down.</p>
+        <img class="shot shot-narrow" src="onboarding/optin.png" alt="The Minus popup with the Contribute anonymous ad snapshots toggle turned on and circled">
+        <p class="shotcap">the toggle in the Minus popup — flip it <b>on</b></p>
       </div>
     </div>
 
