@@ -126,6 +126,18 @@ Headless WebGPU on Linux/NVIDIA needs
 --enable-features=Vulkan --disable-vulkan-surface` and the full Chromium build
 (Playwright `channel: "chromium"`), not the headless shell.
 
+## Support
+
+Minus is free, open-source, and runs entirely on your machine — no ads, no
+tracking, no server bills passed on to you. If it saves you from a few
+autoplay pre-rolls, you can buy me a coffee ☕:
+
+<a href="https://buymeacoffee.com/cyrilengmann" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50" width="210"></a>
+
+> **[buymeacoffee.com/cyrilengmann](https://buymeacoffee.com/cyrilengmann)**
+
+There's also a **☕ coffee** link in the extension popup footer.
+
 ## License
 
 MIT

@@ -1,0 +1,5 @@
+.env
+captures/
+node_modules/
+*.log
+server_test.log
