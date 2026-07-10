@@ -22,10 +22,24 @@ ort.env.logLevel = "error";
 // transformers.js/ORT default `powerPreference` to "high-performance" so
 // requestAdapter() picks the discrete GPU on multi-GPU machines. On Windows,
 // Chromium *ignores* powerPreference and logs a warning on every load
-// (crbug.com/369219127). Unset it on Windows only — a no-op there (it was being
-// ignored anyway), while keeping the discrete-GPU hint on macOS/Linux.
+// (crbug.com/369219127). That warning is emitted by the browser INSIDE
+// requestAdapter() — it's not a console.* call, so the mute list below can't
+// touch it; the only way to silence it is to not pass the option. ORT-web's
+// WebGPU EP requests the adapter itself (see `Ic` in the WASM glue:
+// `requestAdapter({powerPreference: "high-performance"})`), so setting ort.env
+// isn't enough — the EP re-applies its default. Strip it at the one choke point
+// every caller (ours + ORT + transformers.js) funnels through. Windows-only and
+// behaviorally a no-op there (the option is ignored anyway); macOS/Linux keep
+// the discrete-GPU hint untouched.
 if (/Windows/i.test(navigator.userAgent) && ort.env?.webgpu) {
   ort.env.webgpu.powerPreference = undefined;
+}
+if (/Windows/i.test(navigator.userAgent) && navigator.gpu?.requestAdapter) {
+  const realRequestAdapter = navigator.gpu.requestAdapter.bind(navigator.gpu);
+  navigator.gpu.requestAdapter = (opts) => {
+    if (opts && "powerPreference" in opts) { const { powerPreference, ...rest } = opts; opts = rest; }
+    return realRequestAdapter(opts);
+  };
 }
 
 // A few loader warnings are emitted via console.* by ORT / transformers.js and
