@@ -164,7 +164,39 @@ function initActionStyle() {
   chrome.action.setBadgeTextColor?.({ color: "#ffffff" });
 }
 
-chrome.runtime.onInstalled.addListener(initActionStyle);
+// ------------------------------------------------------------- first-run hint
+// Chrome doesn't let an extension pin itself to the toolbar (no API — only
+// managed policy can). So on first install we (a) open a one-time welcome page
+// that teaches the basics and how to pin, and (b) draw the eye to the (likely
+// unpinned, tucked-in-the-🧩-menu) icon with a "NEW" badge + a helpful tooltip.
+// The hint clears the first time the user opens the popup or the welcome page.
+const REST_TITLE = "Minus — vision ad blocker (click for controls)";
+const HINT_TITLE = "👋 Minus is installed — click the 🧩 puzzle menu to pin me, then click me to start";
+
+function showFirstRunHint() {
+  chrome.action.setBadgeText({ text: "NEW" });
+  chrome.action.setTitle({ title: HINT_TITLE });
+}
+function clearFirstRunHint() {
+  chrome.storage.local.get({ onboardingSeen: false }, ({ onboardingSeen }) => {
+    if (onboardingSeen) return;
+    chrome.storage.local.set({ onboardingSeen: true });
+    chrome.action.setBadgeText({ text: "" });
+    chrome.action.setTitle({ title: REST_TITLE });
+  });
+}
+
+function onInstalled(details) {
+  initActionStyle();
+  if (details?.reason === "install") {
+    chrome.storage.local.set({ onboardingSeen: false });
+    chrome.action.setTitle({ title: REST_TITLE });
+    showFirstRunHint();
+    chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") }).catch(() => {});
+  }
+}
+
+chrome.runtime.onInstalled.addListener(onInstalled);
 chrome.runtime.onStartup?.addListener(initActionStyle);
 initActionStyle();
 
@@ -314,6 +346,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const { engineKind } = await getSettings();
         const resp = await askOffscreen({ type: "engine-status", engineKind });
         sendResponse(resp);
+      } else if (msg.type === "minus:onboarding-seen") {
+        clearFirstRunHint();
+        sendResponse({ ok: true });
       } else {
         sendResponse({ ok: false, error: "unknown message" });
       }

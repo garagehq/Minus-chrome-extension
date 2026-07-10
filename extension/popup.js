@@ -95,6 +95,10 @@ async function load() {
 
   document.getElementById("ver").textContent = "v" + chrome.runtime.getManifest().version;
 
+  // Opening the popup counts as "seen onboarding" — clears the first-run
+  // NEW badge + tooltip hint if the welcome page didn't already.
+  ask({ type: "minus:onboarding-seen" });
+
   refreshStatus();
   refreshCount();
   setInterval(() => { refreshStatus(); refreshCount(); }, 1500);

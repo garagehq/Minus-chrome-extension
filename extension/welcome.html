@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Welcome to Minus</title>
+  <style>
+    @font-face { font-family: "VT323"; src: url("VT323.ttf") format("truetype"); font-display: block; }
+    :root { --blue: #3b82f6; --ink: #cfe6ff; --panel: #0e1621; --line: #24425f; --muted: #7f9cbd; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; background: #070b10; color: var(--ink);
+      font-family: "VT323", ui-monospace, monospace; font-size: 20px; line-height: 1.5;
+      display: flex; justify-content: center; padding: 48px 20px; position: relative; overflow-x: hidden;
+    }
+    body::after {
+      content: ""; position: fixed; inset: 0; pointer-events: none;
+      background: repeating-linear-gradient(0deg, rgba(0,0,0,0.16) 0 1px, transparent 1px 3px);
+      mix-blend-mode: multiply;
+    }
+    .wrap { width: 100%; max-width: 560px; position: relative; z-index: 1; }
+
+    .brand { text-align: center; margin-bottom: 6px; }
+    .brand img { width: 72px; height: 72px; image-rendering: pixelated; filter: drop-shadow(0 0 14px rgba(59,130,246,0.5)); }
+    .brand .word { display: block; font-size: 56px; line-height: 1; color: var(--blue);
+      letter-spacing: 0.08em; text-shadow: 0 0 14px rgba(59,130,246,0.55); margin-top: 6px; }
+    .tag { text-align: center; color: var(--muted); font-size: 20px; letter-spacing: 0.04em; margin: 2px 0 34px; }
+
+    .step { display: flex; gap: 16px; align-items: flex-start; padding: 16px 0; border-top: 1px solid var(--line); }
+    .step .n { flex: 0 0 auto; width: 34px; height: 34px; border: 1px solid var(--blue); color: var(--blue);
+      display: flex; align-items: center; justify-content: center; font-size: 22px;
+      box-shadow: 0 0 10px rgba(59,130,246,0.35); }
+    .step h3 { margin: 3px 0 4px; font-size: 24px; color: #9fc6f2; font-weight: normal; letter-spacing: 0.03em; }
+    .step p { margin: 0; color: var(--ink); }
+    .step .hint { color: var(--muted); font-size: 18px; }
+    .pin { color: var(--blue); }
+
+    .note { margin-top: 22px; padding: 14px 16px; border: 1px dashed var(--line); background: var(--panel);
+      color: var(--muted); font-size: 18px; }
+    .note b { color: #6fd39a; }
+
+    .support { margin-top: 22px; padding: 20px 18px; text-align: center; border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(59,130,246,0.07), rgba(59,130,246,0)); }
+    .support .ctext { color: var(--ink); font-size: 19px; margin-bottom: 14px; }
+    .coffee-btn { display: inline-block; font-family: "VT323", monospace; font-size: 22px; letter-spacing: 0.04em;
+      text-decoration: none; color: #061019; background: #ffdd00; border: 1px solid #e5c400;
+      padding: 9px 22px; box-shadow: 0 0 14px rgba(255,221,0,0.35); }
+    .coffee-btn:hover { background: #ffe642; }
+
+    .actions { text-align: center; margin-top: 30px; }
+    .btn { font-family: "VT323", monospace; font-size: 22px; letter-spacing: 0.05em; cursor: pointer;
+      background: transparent; color: var(--blue); border: 1px solid var(--blue); padding: 10px 26px;
+      box-shadow: 0 0 12px rgba(59,130,246,0.3); }
+    .btn:hover { background: var(--blue); color: #061019; }
+    .foot { text-align: center; margin-top: 26px; color: var(--muted); font-size: 16px; letter-spacing: 0.04em; }
+    .foot a { color: var(--muted); text-decoration: none; }
+    .foot a:hover { color: var(--blue); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <img src="icons/m-blue-128.png" alt="Minus">
+      <span class="word">Minus</span>
+    </div>
+    <div class="tag">a vision ad blocker — it <em>looks</em> at the page and covers ads with Spanish flashcards</div>
+
+    <div class="step">
+      <div class="n">1</div>
+      <div>
+        <h3>Pin Minus to your toolbar</h3>
+        <p>Click the <span class="pin">🧩 puzzle-piece</span> icon at the top-right of your browser, then click the <span class="pin">📌 pin</span> next to <b>Minus</b>.</p>
+        <p class="hint">Chrome can't pin an extension for you — one click keeps Minus one click away. You'll see a small <b>M</b> icon: <span class="pin">blue</span> at rest, <span style="color:#ff6b6b">red</span> while it's blocking.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="n">2</div>
+      <div>
+        <h3>Just browse</h3>
+        <p>Open any ad-heavy site. Detected ads get covered with a Spanish flashcard, and the icon shows a count of what it blocked on the page.</p>
+        <p class="hint">Changed your mind about an overlay? Hover it and hit ✕ to reveal the ad underneath.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="n">3</div>
+      <div>
+        <h3>Click the icon for controls</h3>
+        <p>The popup lets you turn blocking on/off (globally or per-site), pick <b>video</b> vs <b>display</b> ads, tune the threshold, and choose the engine.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="n">4</div>
+      <div>
+        <h3>Optional: help Minus get smarter</h3>
+        <p>Minus improves when it sees the ads it misses (and the things it shouldn't cover). You can opt in to send <b>anonymous</b> snapshots:</p>
+        <p class="hint">Click the Minus icon → turn on <b>“Contribute anonymous ad snapshots.”</b> It's <b>off by default</b>. When on, Minus sends only the <b>cropped image</b> of a detected ad plus its <b>hostname</b> — no page content, no browsing history, no identity. Clicking ✕ on an overlay retracts that snapshot before it's ever sent, and there's a 10-minute local cool-down.</p>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>Private by default</b> — nothing leaves your machine; the model runs entirely in your browser.
+      First use downloads the model (~20–60 s) and needs <b>WebGPU</b> (on by default in Chrome/Edge 121+, including Macs).
+    </div>
+
+    <div class="support">
+      <div class="ctext">Minus is free, open-source, and ad-free. If it saves you some sanity, you can chip in ☕</div>
+      <a class="coffee-btn" href="https://buymeacoffee.com/cyrilengmann" target="_blank" rel="noopener">☕ Buy me a coffee</a>
+    </div>
+
+    <div class="actions">
+      <button class="btn" id="done">Got it — start browsing</button>
+    </div>
+    <div class="foot">
+      v<span id="ver">0.0.0</span> ·
+      <a href="https://github.com/garagehq/Minus-chrome-extension" target="_blank" rel="noopener">source ↗</a> ·
+      <a href="https://buymeacoffee.com/cyrilengmann" target="_blank" rel="noopener">buymeacoffee.com/cyrilengmann</a>
+    </div>
+  </div>
+  <script src="welcome.js"></script>
+</body>
+</html>
