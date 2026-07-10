@@ -4,6 +4,7 @@ extension/models/
 *.log
 .cache/
 test-results/
+dist-release/
 tests/screenshots/
 server/.env
 server/node_modules/

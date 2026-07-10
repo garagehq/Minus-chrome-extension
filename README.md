@@ -65,13 +65,26 @@ are timeout-bounded, so a flaky GPU driver can't wedge the engine.
 
 ## Install (unpacked)
 
-1. Download the latest `minus-extension-vX.Y.Z.zip` from
-   [Releases](https://github.com/garagehq/Minus-chrome-extension/releases) and
-   unzip it.
-2. Open `chrome://extensions`, enable **Developer mode** (top-right).
-3. **Load unpacked** → select the unzipped `extension/` folder.
+The extension isn't on the Chrome Web Store yet, so you load it unpacked from
+the release zip. It's a two-minute, four-step process:
+
+1. **Download** the latest `minus-extension-vX.Y.Z.zip` (~400 MB — it bundles
+   the vision model) from
+   [Releases](https://github.com/garagehq/Minus-chrome-extension/releases).
+2. **Unzip it.** You get a folder like `minus-extension-vX.Y.Z/` with
+   `manifest.json` right inside it — that folder *is* the extension (no nested
+   `extension/` subfolder to dig into).
+3. Open `chrome://extensions`, turn on **Developer mode** (top-right toggle),
+   click **Load unpacked**, and select the **unzipped folder** from step 2 (the
+   one containing `manifest.json`).
 4. Browse an ad-heavy site. The model loads on first use (~20–60 s), then
-   overlays appear on detected ads. Left-click the icon for all settings.
+   overlays appear on detected ads. Left-click the toolbar icon for all
+   settings.
+
+To update later: download the newer zip, unzip it, and either **Load unpacked**
+the new folder or hit the ↻ reload on the existing card after replacing the
+files. Works the same in **Edge** (`edge://extensions`) and other Chromium
+browsers.
 
 Requirements: Chrome/Chromium/Edge 121+ (WebGPU recommended); ~1–2 GB free RAM.
 

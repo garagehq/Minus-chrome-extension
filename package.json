@@ -9,7 +9,8 @@
   "scripts": {
     "test": "bash tests/run_regression.sh",
     "build": "node build.mjs",
-    "build:models": "node build_model_index.mjs"
+    "build:models": "node build_model_index.mjs",
+    "package": "node package.mjs"
   },
   "repository": {
     "type": "git",
