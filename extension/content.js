@@ -192,6 +192,17 @@
     return false;
   }
 
+  // A near-square element (aspect ~1.0). The only square IAB sizes (200x200,
+  // 250x250) are rare and are what square PRODUCT tiles collide with, so a bare
+  // (context-less) near-square image is a product/content tile, not an ad.
+  // Banner ads are rectangular (300x250 = 1.2, 728x90, 160x600, ...), so they
+  // pass. This is the primary guard against shopping-grid product-tile FPs.
+  function isSquarish(w, h) {
+    if (!h) return false;
+    const r = w / h;
+    return r >= 0.87 && r <= 1.15;
+  }
+
   function isConsentUI(el) {
     const s = `${el.id || ""} ${typeof el.className === "string" ? el.className : ""}`;
     if (CONSENT_HINT.test(s)) return true;
@@ -227,6 +238,11 @@
       if (allowed.has(el) || overlays.has(el)) return false;
       if (el.closest?.("[data-minus-overlay]")) return false;
       if (isConsentUI(el)) return false;                  // cookie/CMP banners are not ads
+      // An <img> whose pixels haven't loaded is a dark/blank placeholder box —
+      // classifying it flags lazy-loading product/content tiles as ads (seen on
+      // Nike/Wish/AliExpress grids). Skip until it actually has pixels; the next
+      // scan re-evaluates it (real ad creatives load fast, so coverage is intact).
+      if (el.tagName === "IMG" && (!el.complete || el.naturalWidth === 0)) return false;
       const rect = el.getBoundingClientRect();
       if (!isVisible(el, rect)) return false;
       if (!adPlausibleShape(rect)) return false;          // single ad slot only, no content columns
@@ -282,8 +298,8 @@
         const rc = el.getBoundingClientRect();
         let isAd;
         if (ctx) isAd = r.p_ad >= CTX_BLOCK_P;
-        else if (isStandardAdSize(rc.width, rc.height)) isAd = r.p_ad >= BARE_BLOCK_P;
-        else isAd = false;
+        else if (isStandardAdSize(rc.width, rc.height) && !isSquarish(rc.width, rc.height)) isAd = r.p_ad >= BARE_BLOCK_P;
+        else isAd = false;                                  // bare + non-rectangular-standard: editorial photos / product tiles live here
         verdictCache.set(sig, isAd);
         if (verdictCache.size > 500) verdictCache.delete(verdictCache.keys().next().value);
         if (isAd) {
