@@ -40,6 +40,16 @@ The engine list is generated from the packaged models (`models/index.json`), so
 dropping in a new model dir makes it selectable with no code changes. Switch in
 the popup (reloads the engine).
 
+**Per-engine decision thresholds** (v0.3.1): a catalog entry can carry
+`"thresholds": { "ctx": …, "bare": … }` — the confidence bars content.js applies
+to ad-context elements (iframes / ad-slots) and bare standard-size images. The
+default Iter 24 engine ships tuned gates (0.35 / 0.75, vs the conservative
+0.60 / 0.88 fallback) because its score distribution separates ads from content
+cleanly (8/499 benchmark non-ads above p 0.3); a 60-minute live A/B measured
+**~33 % more ads covered at unchanged ~90 % precision**. Engines without the
+field keep the conservative defaults, and each new model ships its own operating
+point instead of inheriting a predecessor's.
+
 | Engine (`key`) | Model | Notes |
 |---|---|---|
 | **`lfm`** (default) | LFM2.5-VL-450M **Iter 24-web**, q4/q8 ONNX (~431 MB) | Content hard-negative retrain on the Iter 21 base — catches web-display ads with the **fewest content false-positives** of any iteration (live precision ~90%). Shipping default. **WebGPU only.** |
