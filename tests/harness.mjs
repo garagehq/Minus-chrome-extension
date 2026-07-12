@@ -113,26 +113,46 @@ export function serveFixtures(port = 8919) {
 
 // Wait until the extension's engine reports ready (first run downloads the
 // model, so the ceiling is generous).
+//
+// Robustness (learned the hard way): MV3 idle-kills the service worker, and a
+// Playwright `sw.evaluate` on a dead SW handle can HANG FOREVER — which also
+// meant the overall timeout (only checked between polls) never fired. So every
+// poll (a) re-acquires the current SW handle from the context, and (b) races
+// the evaluate against a hard per-poll timeout; a hung/failed poll is just
+// retried until the overall deadline.
 export async function waitForEngine(ctx, timeoutMs = 15 * 60 * 1000) {
-  let [sw] = ctx.serviceWorkers();
-  if (!sw) sw = await ctx.waitForEvent("serviceworker", { timeout: 60000 });
   const t0 = Date.now();
+  let lastState = "";
   for (;;) {
-    const info = await sw.evaluate(async () => {
-      try {
-        // NB: a context never receives its own runtime message, so from the
-        // service worker we must address the offscreen document directly.
-        if (typeof ensureOffscreen === "function") await ensureOffscreen();
-        // match real usage: the background reads engineKind from storage and
-        // forwards it to the offscreen; do the same from the SW here.
-        const { engineKind = "lfm" } = await chrome.storage.local.get({ engineKind: "lfm" });
-        const r = await new Promise((resolve) =>
-          chrome.runtime.sendMessage({ target: "minus-offscreen", type: "engine-status", engineKind }, resolve));
-        return r?.info || r || { state: "no-offscreen-response" };
-      } catch (e) {
-        return { state: "swerr", error: String(e) };
-      }
-    });
+    let info;
+    try {
+      let [sw] = ctx.serviceWorkers();
+      if (!sw) sw = await ctx.waitForEvent("serviceworker", { timeout: 60000 });
+      info = await Promise.race([
+        sw.evaluate(async () => {
+          try {
+            // NB: a context never receives its own runtime message, so from the
+            // service worker we must address the offscreen document directly.
+            if (typeof ensureOffscreen === "function") await ensureOffscreen();
+            // match real usage: the background reads engineKind from storage and
+            // forwards it to the offscreen; do the same from the SW here.
+            const { engineKind = "lfm" } = await chrome.storage.local.get({ engineKind: "lfm" });
+            const r = await new Promise((resolve) =>
+              chrome.runtime.sendMessage({ target: "minus-offscreen", type: "engine-status", engineKind }, resolve));
+            return r?.info || r || { state: "no-offscreen-response" };
+          } catch (e) {
+            return { state: "swerr", error: String(e) };
+          }
+        }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("sw-evaluate hang (>20s)")), 20000)),
+      ]);
+    } catch (e) {
+      info = { state: "poll-error", error: String(e).slice(0, 140) };
+    }
+    if (info?.state !== lastState) {
+      console.log(`[harness] engine state: ${info?.state}${info?.error ? " — " + String(info.error).slice(0, 120) : ""}`);
+      lastState = info?.state;
+    }
     if (info?.state === "ready") return info;
     if (info?.state === "error") throw new Error(`engine error: ${info.error}`);
     if (Date.now() - t0 > timeoutMs) throw new Error(`engine not ready in time (last: ${JSON.stringify(info)})`);

@@ -30,6 +30,19 @@ ok("default key resolves to the current default dir", resolveModel(FALLBACK_CATA
 ok("parseCatalog repairs a bad default", parseCatalog({ default: "ghost", models: [{ key: "a", dir: "a" }] }).default === "a");
 ok("parseCatalog on junk yields the fallback", parseCatalog(null).models.length === FALLBACK_CATALOG.models.length);
 
+// --- per-engine thresholds (the Iter 24 threshold-lever plumbing) -------------
+ok("parseCatalog preserves an entry's thresholds field",
+   parseCatalog({ default: "a", models: [{ key: "a", dir: "a", thresholds: { ctx: 0.35, bare: 0.75 } }] })
+     .models[0].thresholds?.ctx === 0.35);
+{
+  const { readFileSync } = await import("fs");
+  const idx = JSON.parse(readFileSync(new URL("../extension/models/index.json", import.meta.url)));
+  const lfm = idx.models.find((m) => m.key === "lfm");
+  const th = lfm?.thresholds;
+  ok("packaged index.json default engine carries sane thresholds",
+     !!th && th.ctx > 0.05 && th.ctx < 0.6 && th.bare > th.ctx && th.bare < 0.9);
+}
+
 // --- label + kind inference ---------------------------------------------------
 eq("prettifyLabel lfm-iter23web", prettifyLabel("lfm-iter23web"), "LFM Iter 23-web");
 eq("prettifyLabel lfm-iter14", prettifyLabel("lfm-iter14"), "LFM Iter 14");

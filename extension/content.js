@@ -33,8 +33,11 @@
   // the model at the normal bar. A bare <img>/<div> (editorial photos live
   // here) needs high confidence — editorial-photo FPs cluster at 0.66–0.76
   // while real ads sit at 0.90+.
-  const CTX_BLOCK_P = 0.60;                // element has ad context (iframe / ad-hint ancestor)
-  const BARE_BLOCK_P = 0.88;               // context-less element: require high confidence
+  // Defaults tuned for Iter 21-web; per-engine overrides may arrive with
+  // minus:settings (catalog `thresholds` field) — a well-separated model like
+  // Iter 24 (non-ad p>0.3 on only 8/499 bench images) supports lower gates.
+  let CTX_BLOCK_P = 0.60;                  // element has ad context (iframe / ad-hint ancestor)
+  let BARE_BLOCK_P = 0.88;                 // context-less element: require high confidence
   // A context-less element (bare <img>/<div>) is only ever blocked if it is a
   // near-standard IAB ad size. Editorial photos live at arbitrary sizes
   // (307×205, 371×482, 460×307) and were the dominant FP even at p=1.0; real
@@ -86,6 +89,11 @@
       collectOptIn = !!resp.settings.collectOptIn;
       blockVideo = resp.settings.blockVideo !== false;
       blockDisplay = resp.settings.blockDisplay !== false;
+      const th = resp.settings.engineThresholds;
+      if (th) {
+        if (typeof th.ctx === "number" && th.ctx > 0 && th.ctx < 1) CTX_BLOCK_P = th.ctx;
+        if (typeof th.bare === "number" && th.bare > 0 && th.bare < 1) BARE_BLOCK_P = th.bare;
+      }
     }
     if (enabled) start();
   });

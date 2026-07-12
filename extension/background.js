@@ -289,6 +289,26 @@ async function captureTab(windowId) {
 }
 
 // ---------------------------------------------------------------- routing
+// Per-engine decision thresholds from the packaged catalog (models/index.json,
+// optional `thresholds: {ctx, bare}` on an entry). Cached for the SW lifetime;
+// resolution mirrors models_catalog.resolveModel (key -> default -> first).
+let catalogCache = null;
+async function engineThresholds(engineKind) {
+  try {
+    if (!catalogCache) {
+      catalogCache = await (await fetch(chrome.runtime.getURL("models/index.json"))).json();
+    }
+    const models = Array.isArray(catalogCache?.models) ? catalogCache.models : [];
+    const entry = models.find((m) => m?.key === engineKind)
+               || models.find((m) => m?.key === catalogCache?.default)
+               || models[0];
+    const th = entry?.thresholds;
+    return th && (typeof th.ctx === "number" || typeof th.bare === "number") ? th : null;
+  } catch {
+    return null;
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.target === "minus-offscreen") return; // not for us
   (async () => {
@@ -314,6 +334,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           settings: {
             ...settings,
             enabled: settings.enabled && !settings.disabledSites.includes(host),
+            // per-engine decision thresholds (models/index.json `thresholds`);
+            // null -> content.js keeps its built-in defaults.
+            engineThresholds: await engineThresholds(settings.engineKind),
           },
         });
       } else if (msg.type === "minus:blocked") {

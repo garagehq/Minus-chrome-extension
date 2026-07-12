@@ -50,27 +50,52 @@ await new Promise((r) => sink.listen(PORT, "127.0.0.1", r));
 const seedKey = (url) => { let h = 2166136261 >>> 0; const str = url + "::" + ITER; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
 const SITES = SOAK_SITES.map((s, i) => ({ ...s, id: `${s.name}#${i}` })).sort((a, b) => seedKey(a.url) - seedKey(b.url));
 
-const ctx = await launchWithExtension({ requireGpu: true });
-const sw = ctx.serviceWorkers()[0] || await ctx.waitForEvent("serviceworker", { timeout: 60000 });
-const extId = new URL(sw.url()).host;
 const ENGINE = process.env.ENGINE || "lfm";
-await sw.evaluate((cfg) => chrome.storage.local.set(cfg), {
-  collectOptIn: true, enabled: true, blockVideo: true, blockDisplay: true, disabledSites: [],
-  engineKind: ENGINE,
-  ingestUrl: `http://127.0.0.1:${PORT}/ingest`, uploadCooldownMs: 3000,
-});
-console.log(`engine: ${ENGINE}`);
+// The Tegra/Dawn WebGPU adapter can flake in the OFFSCREEN context even when
+// the browser-level probe passed (~50% of cold launches) — retry the whole
+// launch until the engine actually reports ready.
+let ctx, extId;
+for (let attempt = 1; ; attempt++) {
+  ctx = await launchWithExtension({ requireGpu: true });
+  const sw = ctx.serviceWorkers()[0] || await ctx.waitForEvent("serviceworker", { timeout: 60000 });
+  extId = new URL(sw.url()).host;
+  await sw.evaluate((cfg) => chrome.storage.local.set(cfg), {
+    collectOptIn: true, enabled: true, blockVideo: true, blockDisplay: true, disabledSites: [],
+    engineKind: ENGINE,
+    ingestUrl: `http://127.0.0.1:${PORT}/ingest`, uploadCooldownMs: 3000,
+  });
+  console.log(`engine: ${ENGINE} (launch attempt ${attempt})`);
+  try {
+    console.log(`engine ready: ${JSON.stringify(await waitForEngine(ctx, 8 * 60 * 1000))}`);
+    break;
+  } catch (e) {
+    console.log(`[soak] engine failed (attempt ${attempt}): ${String(e).split("\n")[0]}`);
+    await ctx.close().catch(() => {});
+    if (attempt >= 3) throw e;
+    await new Promise((r) => setTimeout(r, 10000));
+  }
+}
 
 const ourErrors = [];
 const agg = {};
 for (const s of SITES) agg[s.id] = { name: s.name, z: !!s.z, v: !!s.v, runs: 0, maxOv: 0, players: 0, covered: 0, fpFlag: 0, errs: 0, crashes: 0, broke: 0, loaded: 0 };
 
 async function engineState() {
-  return sw.evaluate(async () => {
-    try { const { engineKind = "lfm" } = await chrome.storage.local.get({ engineKind: "lfm" });
-      const r = await new Promise((res) => chrome.runtime.sendMessage({ target: "minus-offscreen", type: "engine-status", engineKind }, res));
-      return r?.info?.state || "?"; } catch { return "swerr"; }
-  }).catch(() => "unreachable");
+  // Re-acquire the SW handle each call and race the evaluate: MV3 idle-kills
+  // the SW, and evaluate on a dead handle HANGS (not rejects) — a bare .catch
+  // froze the whole soak loop at the first checkpoint print.
+  try {
+    const s = ctx.serviceWorkers()[0];
+    if (!s) return "no-sw";
+    return await Promise.race([
+      s.evaluate(async () => {
+        try { const { engineKind = "lfm" } = await chrome.storage.local.get({ engineKind: "lfm" });
+          const r = await new Promise((res) => chrome.runtime.sendMessage({ target: "minus-offscreen", type: "engine-status", engineKind }, res));
+          return r?.info?.state || "?"; } catch { return "swerr"; }
+      }),
+      new Promise((res) => setTimeout(() => res("poll-timeout"), 10000)),
+    ]);
+  } catch { return "unreachable"; }
 }
 async function probe(page) {
   let ov = 0, players = 0, covered = false, broke = false;
@@ -96,7 +121,7 @@ async function play(page) { for (const fr of page.frames()) { try { await fr.eva
 
 const t0 = Date.now();
 let cycle = 0, visits = 0;
-console.log(`iter${ITER} breadth soak (${(RUN_MS / 60000).toFixed(0)} min, ${SITES.length} sites); engine=${JSON.stringify(await waitForEngine(ctx, 8 * 60 * 1000))}`);
+console.log(`iter${ITER} breadth soak (${(RUN_MS / 60000).toFixed(0)} min, ${SITES.length} sites)`);
 while (Date.now() - t0 < RUN_MS) {
   cycle++;
   for (const site of SITES) {
@@ -107,17 +132,25 @@ while (Date.now() - t0 < RUN_MS) {
     page.on("console", (m) => { const loc = m.location()?.url || ""; if ((m.type() === "error" || m.type() === "warning") && loc.includes(extId)) { a.errs++; if (ourErrors.length < 120) ourErrors.push({ site: site.name, text: m.text().slice(0, 180) }); } });
     page.on("pageerror", (e) => { const s = String(e); if (/content\.js|offscreen\.js|background\.js|models_catalog|popup\.js/.test(s)) { a.errs++; if (ourErrors.length < 120) ourErrors.push({ site: site.name, text: s.slice(0, 180) }); } });
     try {
-      await page.goto(site.url, { waitUntil: "domcontentloaded", timeout: 30000 });
-      a.loaded++;
-      await page.waitForTimeout(2000); await dismiss(page); if (site.v) await play(page);
-      let maxOv = 0, players = 0, covered = false, broke = false;
-      const end = Date.now() + (site.v ? DWELL_VIDEO : DWELL_REG);
-      while (Date.now() < end && Date.now() - t0 < RUN_MS) { const p = await probe(page); maxOv = Math.max(maxOv, p.ov); players = Math.max(players, p.players); if (p.covered) covered = true; if (p.broke) broke = true; if (site.v) await play(page); await page.waitForTimeout(site.v ? 3000 : 2500); }
-      a.maxOv = Math.max(a.maxOv, maxOv); a.players = Math.max(a.players, players); if (covered) a.covered++; if (broke) a.broke++;
-      if (site.z && maxOv > 0) a.fpFlag++;
-      if (maxOv > 0 || broke) await page.screenshot({ path: join(OUT, `${site.name}_c${cycle}.png`) }).catch(() => {});
+      // Per-site WATCHDOG: page/frame evaluates on a wedged renderer HANG (not
+      // reject) — one bad site must never freeze the whole soak. Race the visit
+      // against dwell + 90s; on expiry, fall through and force-close the page
+      // (which rejects any orphaned evaluates; Promise.race keeps them handled).
+      const visit = (async () => {
+        await page.goto(site.url, { waitUntil: "domcontentloaded", timeout: 30000 });
+        a.loaded++;
+        await page.waitForTimeout(2000); await dismiss(page); if (site.v) await play(page);
+        let maxOv = 0, players = 0, covered = false, broke = false;
+        const end = Date.now() + (site.v ? DWELL_VIDEO : DWELL_REG);
+        while (Date.now() < end && Date.now() - t0 < RUN_MS) { const p = await probe(page); maxOv = Math.max(maxOv, p.ov); players = Math.max(players, p.players); if (p.covered) covered = true; if (p.broke) broke = true; if (site.v) await play(page); await page.waitForTimeout(site.v ? 3000 : 2500); }
+        a.maxOv = Math.max(a.maxOv, maxOv); a.players = Math.max(a.players, players); if (covered) a.covered++; if (broke) a.broke++;
+        if (site.z && maxOv > 0) a.fpFlag++;
+        if (maxOv > 0 || broke) await page.screenshot({ path: join(OUT, `${site.name}_c${cycle}.png`), timeout: 15000 }).catch(() => {});
+      })();
+      const watchdog = new Promise((r) => setTimeout(() => r("watchdog"), (site.v ? DWELL_VIDEO : DWELL_REG) + 90000));
+      if (await Promise.race([visit, watchdog]) === "watchdog") console.log(`  [watchdog] ${site.name} wedged — force-closing`);
     } catch {}
-    await page.close().catch(() => {});
+    await Promise.race([page.close().catch(() => {}), new Promise((r) => setTimeout(r, 8000))]);
     if (visits % 10 === 0 || site.v) console.log(`[+${Math.round((Date.now() - t0) / 60000)}m c${cycle} v${visits}] ${site.name.padEnd(20)} ov=${a.maxOv} cov=${a.covered}/${a.runs} caps=${captures.length} errs=${ourErrors.length} engine=${await engineState()}`);
   }
 }
