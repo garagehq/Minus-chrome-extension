@@ -11,7 +11,8 @@
 export const FALLBACK_CATALOG = {
   default: "lfm",
   models: [
-    { key: "lfm", dir: "lfm-iter21web", kind: "lfm", label: "LFM Iter 21-web (default — web ads, no content false-positives)" },
+    { key: "lfm", dir: "lfm-iter24", kind: "lfm", label: "LFM Iter 24-web (default — web ads, fewest content false-positives)" },
+    { key: "lfm-iter21", dir: "lfm-iter21web", kind: "lfm", label: "LFM Iter 21-web (previous default)" },
     { key: "lfm-iter22", dir: "lfm-iter22web", kind: "lfm", label: "LFM Iter 22-web (experimental — higher web-ad recall)" },
     { key: "lfm-web", dir: "lfm-iter20web", kind: "lfm", label: "LFM Iter 20-web (aggressive web-ad blocking)" },
     { key: "lfm-stream", dir: "lfm-iter14", kind: "lfm", label: "LFM Iter 14 (streaming-only)" },

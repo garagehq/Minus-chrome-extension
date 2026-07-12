@@ -42,8 +42,10 @@ the popup (reloads the engine).
 
 | Engine (`key`) | Model | Notes |
 |---|---|---|
-| **`lfm`** (default) | LFM2.5-VL-450M **Iter 21-web**, q4/q8 ONNX (~431 MB) | Catches web-display ads **and** doesn't false-positive on product/book imagery. Shipping default. **WebGPU only.** |
-| `lfm-iter22` | LFM Iter 22-web | Experimental; higher web-ad recall. WebGPU only. |
+| **`lfm`** (default) | LFM2.5-VL-450M **Iter 24-web**, q4/q8 ONNX (~431 MB) | Content hard-negative retrain on the Iter 21 base — catches web-display ads with the **fewest content false-positives** of any iteration (live precision ~90%). Shipping default. **WebGPU only.** |
+| `lfm-iter21` | LFM Iter 21-web | Previous default. WebGPU only. |
+| `lfm-iter22` | LFM Iter 22-web | Experimental; higher web-ad recall (more content FPs). WebGPU only. |
+| `lfm-iter23` | LFM Iter 23-web | Content hard-negatives on the Iter 22 base (superseded by Iter 24). WebGPU only. |
 | `lfm-web` | LFM Iter 20-web | Aggressive web-ad blocking (more FPs on product imagery). WebGPU only. |
 | `lfm-stream` | LFM Iter 14 | Streaming-tuned (99.08 % frozen holdout). WebGPU only. |
 | `siglip2` | SigLIP2-SO400M-384 fine-tune | Single forward pass, fast; large (~817 MB fp16). |

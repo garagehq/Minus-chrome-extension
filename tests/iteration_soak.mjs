@@ -53,10 +53,13 @@ const SITES = SOAK_SITES.map((s, i) => ({ ...s, id: `${s.name}#${i}` })).sort((a
 const ctx = await launchWithExtension({ requireGpu: true });
 const sw = ctx.serviceWorkers()[0] || await ctx.waitForEvent("serviceworker", { timeout: 60000 });
 const extId = new URL(sw.url()).host;
+const ENGINE = process.env.ENGINE || "lfm";
 await sw.evaluate((cfg) => chrome.storage.local.set(cfg), {
   collectOptIn: true, enabled: true, blockVideo: true, blockDisplay: true, disabledSites: [],
+  engineKind: ENGINE,
   ingestUrl: `http://127.0.0.1:${PORT}/ingest`, uploadCooldownMs: 3000,
 });
+console.log(`engine: ${ENGINE}`);
 
 const ourErrors = [];
 const agg = {};

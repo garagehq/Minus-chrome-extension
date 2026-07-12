@@ -19,13 +19,15 @@ mkdirSync(outDir, { recursive: true });
 const out = join(outDir, `minus-extension-v${version}.zip`);
 if (existsSync(out)) rmSync(out);
 
-// Releases ship only the DEFAULT engine's weights (lfm -> lfm-iter21web). The
-// other four engine dirs are dev-only; bundling them would ~6x the download.
+// Releases ship only the DEFAULT engine's weights (lfm -> lfm-iter24). The
+// other engine dirs are dev-only; bundling them would many-x the download.
 // A trailing "*" (no slash) drops both the dir entry and its contents.
 const EXCLUDE = [
   "models/lfm-iter14*",
   "models/lfm-iter20web*",
+  "models/lfm-iter21web*",
   "models/lfm-iter22web*",
+  "models/lfm-iter23*",
   "models/siglip2*",
   "*/.DS_Store",
   ".DS_Store",
