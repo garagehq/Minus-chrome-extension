@@ -58,7 +58,8 @@
   const verdictCache = new Map();          // signature -> is_ad
   const overlays = new Map();              // element -> overlay div
   const videoState = new WeakMap();        // video -> {adVotes, nonAdVotes, blocked}
-  const iframeState = new WeakMap();        // large cross-origin iframe -> {fp, adVotes, nonAdVotes, blocked, classified}
+  const iframeState = new WeakMap();       // large cross-origin iframe -> {fp, adVotes, nonAdVotes, blocked, classified}
+  let iframeTick = 0;                      // sampler tick counter (blocked frames re-verify every 2nd tick)
   // The content script runs in every frame (manifest all_frames). The TOP frame
   // does the full static scan + tab-screenshot work; SUB-frames run only the
   // <video> path (reading frames directly off the element, no tab screenshot —
@@ -275,7 +276,7 @@
       }).slice(0, 12); // cap batch per scan
       if (!els.length) return;
 
-      const shot = await captureClean();
+      const shot = await captureClean(els.map((el) => el.getBoundingClientRect()));
       if (!shot) return;
       const crops = [];
       const kept = [];
@@ -323,13 +324,36 @@
 
   // Screenshot with our own overlays hidden, so a crop can never bake in a
   // prior "el anuncio" flashcard that visually overlaps the target region.
-  async function captureClean() {
-    const divs = [...overlays.values()].filter((d) => d.style.visibility !== "hidden");
-    divs.forEach((d) => (d.style.visibility = "hidden"));
-    if (divs.length) await new Promise((r) => setTimeout(r, 50));
-    const shot = await capture();
+  // Take a screenshot with our own flashcards out of the way — but ONLY the
+  // cards overlapping `rects` (the regions actually being read). Hiding every
+  // card made ALL overlays blink visibly on the iframe sampler's ~3s cadence
+  // (the "ads reappear then get re-blocked" bug on iframe-heavy sites): the
+  // hide window spanned the capture rate-limit wait (<=600ms) + shot + decode.
+  // Now: (1) targeted hide, (2) the rate-limit wait happens BEFORE hiding
+  // (minus:capture-wait pre-arms the slot), (3) cards are restored before the
+  // (slow) dataURL->Image decode. Cards not under inspection never blink.
+  async function captureClean(rects) {
+    const divs = [...overlays.values()].filter((d) => {
+      if (d.style.visibility === "hidden") return false;
+      if (!rects || !rects.length) return true;
+      const r = d.getBoundingClientRect();
+      return rects.some((q) => r.left < q.right && r.right > q.left && r.top < q.bottom && r.bottom > q.top);
+    });
+    if (divs.length) {
+      await new Promise((r) => chrome.runtime.sendMessage({ type: "minus:capture-wait" }, r)); // pre-arm rate limiter
+      divs.forEach((d) => (d.style.visibility = "hidden"));
+      await new Promise((r) => setTimeout(r, 50)); // let the compositor repaint
+    }
+    const dataUrl = await new Promise((resolve) =>
+      chrome.runtime.sendMessage({ type: "minus:capture" }, (resp) => resolve(resp?.ok ? resp.dataUrl : null)));
     divs.forEach((d) => (d.style.visibility = ""));
-    return shot;
+    if (!dataUrl) return null;
+    return await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    });
   }
 
   function capture() {
@@ -677,11 +701,17 @@
       return r.width >= IFRAME_MIN_W && r.height >= IFRAME_MIN_H && isVisible(f, r);
     });
     if (!frames.length) return;
-    const shot = await captureClean();  // hide our own cards so we read iframe pixels
+    // Blocked frames only need re-verification every 2nd tick (~6s) — halves
+    // how often THEIR OWN card must blink for a clean read; unblocked frames
+    // sample every tick. Cards elsewhere on the page never blink (targeted hide).
+    iframeTick++;
+    const sampled = frames.filter((f) => !(iframeState.get(f)?.blocked) || iframeTick % 2 === 0);
+    if (!sampled.length) return;
+    const shot = await captureClean(sampled.map((f) => f.getBoundingClientRect()));
     if (!shot) return;
 
     const pending = [];
-    for (const f of frames) {
+    for (const f of sampled) {
       const frame = iframeFrameAndFp(shot, f.getBoundingClientRect());
       if (!frame) continue;
       const st = iframeState.get(f) || { fp: null, adVotes: 0, nonAdVotes: 0, blocked: false, classified: false };

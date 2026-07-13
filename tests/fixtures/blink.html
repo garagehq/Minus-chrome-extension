@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Minus fixture — banner + animated xorigin iframe (blink regression)</title>
+<style>body{font-family:sans-serif;max-width:1100px;margin:24px auto}img{width:480px;height:270px;display:block}iframe{width:760px;height:440px;border:1px solid #ccc}</style>
+</head><body>
+<h1>wco-style page: banner ad above an animated cross-origin iframe</h1>
+<p>The banner gets display-blocked; the big animated iframe keeps the motion sampler
+ticking every ~2.5s. Regression: the banner's flashcard must NOT blink while the
+sampler takes its clean captures (targeted-hide fix).</p>
+<figure><img id="ad-img" src="ad1.png" alt=""><figcaption>banner slot</figcaption></figure>
+<iframe id="animframe" src="http://localhost:8919/blink_inner.html"></iframe>
+</body></html>

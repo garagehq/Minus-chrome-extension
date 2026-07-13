@@ -372,6 +372,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       } else if (msg.type === "minus:onboarding-seen") {
         clearFirstRunHint();
         sendResponse({ ok: true });
+      } else if (msg.type === "minus:capture-wait") {
+        // Pre-arm the capture rate limiter WITHOUT taking a shot: content.js
+        // calls this before hiding overlay cards for a clean capture, so the
+        // <=600ms rate-limit wait happens while the cards are still visible
+        // (shrinks the visible blink to just the capture itself).
+        const wait = Math.max(0, lastCaptureAt + MIN_CAPTURE_INTERVAL_MS - Date.now());
+        if (wait) await new Promise((r) => setTimeout(r, wait));
+        sendResponse({ ok: true });
       } else {
         sendResponse({ ok: false, error: "unknown message" });
       }
