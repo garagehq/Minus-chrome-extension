@@ -27,9 +27,16 @@ try {
     });
     if (!cards.length) return { blinks: -1, samples: 0 };
     const mo = new MutationObserver((muts) => {
-      for (const m of muts) if (m.attributeName === "style" && m.target.style.visibility === "hidden") out.blinks++;
+      // count hide TRANSITIONS only (old style visible -> now hidden); position
+      // updates that merely land during a hide window must not inflate the count
+      for (const m of muts) {
+        if (m.attributeName !== "style") continue;
+        const was = /visibility:\s*hidden/.test(m.oldValue || "");
+        const is_ = m.target.style.visibility === "hidden";
+        if (!was && is_) out.blinks++;
+      }
     });
-    for (const c of cards) mo.observe(c, { attributes: true, attributeFilter: ["style"] });
+    for (const c of cards) mo.observe(c, { attributes: true, attributeFilter: ["style"], attributeOldValue: true });
     const t0 = Date.now();
     while (Date.now() - t0 < 25000) { out.samples++; await new Promise((r) => setTimeout(r, 250)); }
     mo.disconnect();
@@ -37,6 +44,39 @@ try {
   });
   check("banner card found and observed", res.blinks >= 0, JSON.stringify(res));
   check("banner card NEVER blinks while iframe sampler runs (25s)", res.blinks === 0, `hidden-flips=${res.blinks}`);
+  await p.close();
+
+  // Part 2 — a COVERED looping-ad iframe (the wco.tv report): its own card may
+  // peek, but only on the event-driven backoff (10s -> 20s -> 40s), never on the
+  // old every-tick cadence. Old behavior: ~10-20 flips in 50s. Budget: <=3.
+  const p2 = await ctx.newPage();
+  await p2.goto("http://127.0.0.1:8919/blink2.html", { waitUntil: "load" });
+  // inner frame shows CONTENT for 12s, then the ad break starts (the wco timeline)
+  await p2.locator("[data-minus-overlay]").first().waitFor({ state: "visible", timeout: 150000 });
+  const res2 = await p2.evaluate(async () => {
+    const out = { blinks: 0 };
+    const cards = [...document.querySelectorAll("[data-minus-overlay]")];
+    const mo = new MutationObserver((muts) => {
+      // count hide TRANSITIONS only (old style visible -> now hidden); position
+      // updates that merely land during a hide window must not inflate the count
+      for (const m of muts) {
+        if (m.attributeName !== "style") continue;
+        const was = /visibility:\s*hidden/.test(m.oldValue || "");
+        const is_ = m.target.style.visibility === "hidden";
+        if (!was && is_) out.blinks++;
+      }
+    });
+    for (const c of cards) mo.observe(c, { attributes: true, attributeFilter: ["style"], attributeOldValue: true });
+    const t0 = Date.now();
+    while (Date.now() - t0 < 55000) await new Promise((r) => setTimeout(r, 250));
+    mo.disconnect();
+    return out;
+  });
+  const kind = await p2.evaluate(() => document.querySelector("[data-minus-overlay]")?.dataset.minusKind);
+  check("covered via the MOTION path (kind=video — the wco scenario)", kind === "video", `kind=${kind}`);
+  check("covered iframe card peeks on backoff only (1-4 flips in 55s)", res2.blinks >= 1 && res2.blinks <= 4, `hidden-flips=${res2.blinks} (old cadence ~10-20; 0 = backoff path never ran)`);
+  check("covered iframe stays covered (looping ad not un-blocked)", await p2.evaluate(() => document.querySelectorAll("[data-minus-overlay]").length) >= 1);
+  await p2.close();
 } catch (e) {
   console.log("FAIL  (exception)", String(e).split("\n")[0]); fail++;
 } finally {

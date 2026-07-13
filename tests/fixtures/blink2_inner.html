@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html><head><style>
+body{margin:0;overflow:hidden;background:#222;color:#888;font-family:sans-serif}
+#pre{display:flex;align-items:center;justify-content:center;height:100vh;font-size:28px}
+#adwrap{display:none}
+#adwrap img{width:96vw;height:72vh;object-fit:cover;display:block;animation:mv 1.6s ease-in-out infinite alternate}
+#strip{position:fixed;bottom:0;left:0;right:0;height:12vh;animation:col 0.9s linear infinite alternate}
+@keyframes mv{from{transform:translate(0,0)}to{transform:translate(40px,14px)}}
+@keyframes col{from{background:#000}to{background:#fff}}
+</style></head><body>
+<div id="pre">episode content playing…</div>
+<div id="adwrap"><img src="ad1.png"><div id="strip"></div></div>
+<script>
+// wco timeline: content first, ad break starts after 12s (motion + ad pixels)
+setTimeout(() => { document.getElementById("pre").style.display="none";
+                   document.getElementById("adwrap").style.display="block"; }, 12000);
+</script></body></html>

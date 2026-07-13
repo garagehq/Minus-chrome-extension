@@ -70,12 +70,16 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
   self-heals ×3). Headless WebGPU needs `--enable-unsafe-webgpu
   --ignore-gpu-blocklist --use-angle=vulkan --enable-features=Vulkan
   --disable-vulkan-surface` and the full chromium build, not headless shell.
-- **Clean captures must be TARGETED.** `captureClean(rects)` hides only the
-  cards overlapping the regions being read; hiding all cards made every overlay
-  blink on the iframe sampler's ~2.5s cadence (the wco.tv "reappearing ads"
-  report — 30 visible flips per 25s). Pre-arm the capture rate limiter
-  (`minus:capture-wait`) BEFORE hiding; restore before image decode. Regression:
-  `tests/test_no_blink.mjs`.
+- **Clean captures must be TARGETED and covered frames peek on BACKOFF, not a
+  timer.** `captureClean(rects)` hides only cards over the regions being read
+  (hiding all cards = every overlay blinking every ~2.5s — the wco.tv report).
+  A video-covered iframe re-verifies at 10s→20s→40s (cap 45s), fast-confirms an
+  ad-end verdict exactly once (churn cap), reschedules on classify errors (no
+  machine-gunning), and peeks immediately on iframe src change. Display-covered
+  iframes NEVER peek (src change resets). Iframes whose inner Minus script can
+  read their <video> directly announce `__minusInnerVideo` and are never
+  screenshot-peeked. Regression: `tests/test_no_blink.mjs` (counts hide
+  TRANSITIONS with attributeOldValue — naive style-mutation counting inflates).
 - **`pkill -f <pattern>` can match the invoking shell's own command line** and
   SIGTERM your session (exit 144). Kill by exact PID or `pkill -x chrome`.
 - Chrome caches the MV3 SW script in the profile — the harness scrubs

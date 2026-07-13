@@ -607,7 +607,15 @@
     const crops = [], kept = [], needShot = [];
     for (const v of videos) {
       const direct = frameFromVideo(v);
-      if (direct) { crops.push(direct); kept.push(v); }
+      if (direct) {
+        crops.push(direct); kept.push(v);
+        // tell the top frame this iframe's video is directly readable — it can
+        // skip screenshot-peeking (and card-blinking) our iframe entirely
+        if (!IS_TOP && Date.now() - (window.__minusLastHello || 0) > 5000) {
+          window.__minusLastHello = Date.now();
+          try { window.top.postMessage({ __minusInnerVideo: true }, "*"); } catch {}
+        }
+      }
       else if (IS_TOP) needShot.push(v); // screenshot fallback needs top-frame coordinates
       // in a sub-frame a video we can't read directly is skipped (#2's top-frame
       // motion sampler covers its iframe instead)
@@ -692,53 +700,121 @@
     return s / a.length;
   }
 
+  // ---- covered-frame peek scheduling (the anti-blink policy) ----------------
+  // Once a frame/video is COVERED, reading beneath its card requires briefly
+  // hiding the card — a visible blink. So covered things are re-checked on an
+  // EVENT-DRIVEN schedule, not a timer cadence:
+  //   - first peek 10s after covering, then backoff x2 up to 45s (a looping
+  //     wco-style ad settles at ~1 blink/45s instead of blinking every tick);
+  //   - a "maybe the ad ended" verdict (non-ad vote 1 of 2) fast-tracks the
+  //     confirming peek (~2.6s) so real ad-break ends still uncover quickly;
+  //   - an iframe src change (ad rotation / player state change) peeks NOW;
+  //   - an iframe whose INNER Minus script can read its <video> directly
+  //     (untainted) announces itself and is never screenshot-peeked at all.
+  function schedulePeek(st, stillAd) {
+    if (!stillAd && !(st.fastConfirms > 0)) {
+      // "maybe the ad ended" -> ONE fast confirming peek. Capped at one so a
+      // borderline verdict that churns around the threshold can't ping-pong
+      // the card (each fast peek is a visible blink).
+      st.fastConfirms = 1;
+      st.nextPeekAt = Date.now() + VIDEO_SAMPLE_MS + 100;
+    } else {
+      st.fastConfirms = 0;
+      st.peekGap = Math.min(45000, (st.peekGap || 5000) * 2);
+      st.nextPeekAt = Date.now() + st.peekGap;
+    }
+  }
+
+  // inner-frame handshake: sub-frame video path announces direct readability
+  if (IS_TOP) {
+    window.addEventListener("message", (e) => {
+      if (!e.data || e.data.__minusInnerVideo !== true) return;
+      for (const f of document.querySelectorAll("iframe")) {
+        if (f.contentWindow === e.source) {
+          const st = iframeState.get(f) || { fp: null, adVotes: 0, nonAdVotes: 0, blocked: false, classified: false };
+          st.innerCapableAt = Date.now();
+          iframeState.set(f, st);
+        }
+      }
+    });
+  }
+
+  const srcWatched = new WeakSet();
+  function watchSrc(f) {
+    if (srcWatched.has(f)) return;
+    srcWatched.add(f);
+    new MutationObserver(() => {
+      const st = iframeState.get(f);
+      if (st) { st.nextPeekAt = 0; st.fp = null; iframeState.set(f, st); } // rotation: peek now, refingerprint
+    }).observe(f, { attributes: true, attributeFilter: ["src"] });
+  }
+
   async function sampleIframes() {
     if (!IS_TOP || !enabled || document.hidden) return;
     if (!blockVideo && !blockDisplay) return; // this sampler feeds both types
+    const now = Date.now();
     const frames = [...document.querySelectorAll("iframe")].filter((f) => {
       if (allowed.has(f) || !isCrossOriginFrame(f)) return false;
       const r = f.getBoundingClientRect();
-      return r.width >= IFRAME_MIN_W && r.height >= IFRAME_MIN_H && isVisible(f, r);
+      if (r.width < IFRAME_MIN_W || r.height < IFRAME_MIN_H || !isVisible(f, r)) return false;
+      const st = iframeState.get(f);
+      // the inner Minus script reads this frame's video directly — never peek
+      if (st?.innerCapableAt && now - st.innerCapableAt < 15000) return false;
+      // covered frames wait for their scheduled peek (no card-blink otherwise)
+      if (st?.blocked && now < (st.nextPeekAt || 0)) return false;
+      watchSrc(f);
+      return true;
     });
     if (!frames.length) return;
-    // Blocked frames only need re-verification every 2nd tick (~6s) — halves
-    // how often THEIR OWN card must blink for a clean read; unblocked frames
-    // sample every tick. Cards elsewhere on the page never blink (targeted hide).
-    iframeTick++;
-    const sampled = frames.filter((f) => !(iframeState.get(f)?.blocked) || iframeTick % 2 === 0);
-    if (!sampled.length) return;
-    const shot = await captureClean(sampled.map((f) => f.getBoundingClientRect()));
+    const shot = await captureClean(frames.map((f) => f.getBoundingClientRect()));
     if (!shot) return;
 
     const pending = [];
-    for (const f of sampled) {
+    for (const f of frames) {
       const frame = iframeFrameAndFp(shot, f.getBoundingClientRect());
       if (!frame) continue;
       const st = iframeState.get(f) || { fp: null, adVotes: 0, nonAdVotes: 0, blocked: false, classified: false };
       const moving = st.fp && fpDiff(st.fp, frame.fp) > IFRAME_MOTION;
       st.fp = frame.fp;
       iframeState.set(f, st);
-      // Reclassify things that are actually playing (video); classify a still
-      // iframe once (display). Respect the per-type toggles.
-      if (moving) { if (blockVideo) pending.push({ f, url: frame.url, st, motion: true }); }
-      else if (!st.classified && blockDisplay) pending.push({ f, url: frame.url, st, motion: false });
+      if (st.blocked) {
+        // a peek is a classification, motion or not (a static end-card after a
+        // looping ad would otherwise never be re-judged and stay covered forever)
+        if (blockVideo || blockDisplay) pending.push({ f, url: frame.url, st, motion: true, peek: true });
+      } else if (moving) {
+        if (blockVideo) pending.push({ f, url: frame.url, st, motion: true });
+      } else if (!st.classified && blockDisplay) {
+        pending.push({ f, url: frame.url, st, motion: false });
+      }
     }
     if (!pending.length) return;
 
     const results = await classifyBatch(pending.map((p) => p.url));
-    if (!results) return;
+    if (!results) {
+      for (const p of pending) if (p.peek) { p.st.nextPeekAt = Date.now() + (p.st.peekGap || 5000); iframeState.set(p.f, p.st); }
+      return;
+    }
     results.forEach((r, i) => {
-      if (r.error) return; // transient errors are not votes
-      const { f, st, motion } = pending[i];
+      const { f, st, motion, peek } = pending[i];
+      if (r.error) { // transient errors are not votes — but a covered frame must still reschedule, not machine-gun
+        if (peek) { st.nextPeekAt = Date.now() + (st.peekGap || 5000); iframeState.set(f, st); }
+        return;
+      }
       st.classified = true;
       if (motion) {
         if (r.is_ad) { st.adVotes++; st.nonAdVotes = 0; } else { st.nonAdVotes++; st.adVotes = 0; }
-        if (!st.blocked && st.adVotes >= VIDEO_HYSTERESIS) { st.blocked = true; block(f, r.p_ad, "video"); }
-        else if (st.blocked && st.nonAdVotes >= VIDEO_HYSTERESIS) {
-          st.blocked = false; overlays.get(f)?.remove(); overlays.delete(f); reportBlocked();
+        if (!st.blocked && st.adVotes >= VIDEO_HYSTERESIS) {
+          st.blocked = true; st.peekGap = 5000; st.nextPeekAt = Date.now() + 10000;
+          block(f, r.p_ad, "video");
+        } else if (st.blocked && st.nonAdVotes >= VIDEO_HYSTERESIS) {
+          st.blocked = false; st.peekGap = 0; st.nextPeekAt = 0;
+          overlays.get(f)?.remove(); overlays.delete(f); reportBlocked();
+        } else if (peek) {
+          schedulePeek(st, r.is_ad);
         }
       } else if (r.is_ad && !st.blocked) {   // still iframe: one-shot, persistent (display-ad behavior)
-        st.blocked = true; block(f, r.p_ad, "display");
+        st.blocked = true; st.peekGap = 0; st.nextPeekAt = Infinity; // no periodic peeks: static banners never blink (src change resets)
+        block(f, r.p_ad, "display");
       }
       iframeState.set(f, st);
     });
