@@ -297,6 +297,25 @@ async function siglip2Classify(engine, dataUrl) {
 // KEY; we resolve it to a model entry (dir + kind) and reload when the resolved
 // model changes (popup engine switch, or first load).
 let loadedEngineKey = null;
+
+// A WebGPU device can be LOST at runtime — GPU-process restart, driver reset, or
+// memory pressure (common on video-heavy pages like streaming sites). Once lost,
+// every OrtRun on that device fails forever ("A valid external Instance reference
+// no longer exists" / mapAsync / device lost) — the engine is a corpse and the
+// extension silently stops blocking anything. So: detect that error class and
+// REBUILD the engine on a fresh device instead of retrying on the dead one.
+function isFatalGpuError(e) {
+  return /Instance reference no longer exists|failed to call OrtRun|mapAsync|device (is )?lost|buffer_manager|Failed to download data from buffer|GPUDevice|Device lost/i.test(String(e));
+}
+function resetEngine() {
+  const old = enginePromise;
+  enginePromise = null;
+  loadedEngineKey = null;
+  engineInfo = { state: "cold" };
+  // best-effort free the dead session's resources (may itself throw on a lost device)
+  Promise.resolve(old).then((eng) => { try { eng?.model?.dispose?.(); } catch {} }).catch(() => {});
+}
+
 async function getEngine(engineKind = "lfm") {
   const catalog = await getCatalog();
   const entry = resolveModel(catalog, engineKind);
@@ -332,7 +351,16 @@ async function getEngine(engineKind = "lfm") {
 const PROMPT_TEXT =
   `<|startoftext|><|im_start|>user\n<image>${PROMPT}<|im_end|>\n<|im_start|>assistant\n`;
 
+// Test affordance: `test-force-fail` makes the next N classifyOne calls throw
+// the real WebGPU device-loss error, so the recovery path can be tested
+// deterministically. Default 0 = no-op; harmless in production.
+let testForceFail = 0;
+
 async function classifyOne(engine, dataUrl) {
+  if (testForceFail > 0) {
+    testForceFail--;
+    throw new Error("failed to call OrtRun(). ERROR_CODE: 1 ... Failed to execute 'mapAsync' on 'GPUBuffer': A valid external Instance reference no longer exists.");
+  }
   if (engine.kind === "siglip2") return siglip2Classify(engine, dataUrl);
   const { model, processor, yesIds, noIds } = engine;
   const image = await RawImage.fromURL(dataUrl);
@@ -364,14 +392,29 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         // touch the engine so it starts warming up on first status call
         getEngine(msg.engineKind).catch(() => {});
         sendResponse({ ok: true, info: engineInfo });
+      } else if (msg.type === "test-force-fail") {
+        testForceFail = msg.n | 0;
+        sendResponse({ ok: true });
       } else if (msg.type === "classify") {
-        const engine = await getEngine(msg.engineKind);
+        let engine = await getEngine(msg.engineKind);
         const results = [];
+        let rebuilt = false;
         for (const img of msg.images) {
           try {
             results.push(await classifyOne(engine, img));
           } catch (e) {
-            console.warn("[minus] classify error, retrying once:", e);
+            const fatal = isFatalGpuError(e);
+            // On a lost GPU device, rebuild the engine ONCE for this batch, then
+            // retry on the fresh one; a plain transient error just retries once.
+            if (fatal && !rebuilt) {
+              rebuilt = true;
+              console.warn("[minus] GPU device lost — rebuilding engine:", String(e).slice(0, 120));
+              resetEngine();
+              try { engine = await getEngine(msg.engineKind); }
+              catch (er) { results.push({ p_ad: 0, ms: 0, error: String(er) }); continue; }
+            } else {
+              console.warn("[minus] classify error, retrying once:", String(e).slice(0, 120));
+            }
             try {
               results.push(await classifyOne(engine, img));
             } catch (e2) {

@@ -70,6 +70,15 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
   self-heals ×3). Headless WebGPU needs `--enable-unsafe-webgpu
   --ignore-gpu-blocklist --use-angle=vulkan --enable-features=Vulkan
   --disable-vulkan-surface` and the full chromium build, not headless shell.
+- **The engine must self-recover from WebGPU DEVICE LOSS.** Under GPU pressure
+  (video-heavy pages; on this box, concurrent training) the WebGPU device is
+  lost — every OrtRun then fails forever ("A valid external Instance reference no
+  longer exists" / mapAsync / device lost) and the extension silently STOPS
+  BLOCKING (the wco.tv "no ads blocked" report). offscreen.js `isFatalGpuError`
+  detects that class and rebuilds the engine on a fresh device (retrying on the
+  dead one is futile). Tests: `test_gpu_recovery_unit` (pure, in `npm test`) +
+  `test_device_loss_recovery` (WebGPU integration — needs a FREE GPU, so it
+  can't run while training saturates the Tegra).
 - **Clean captures must be TARGETED and covered frames peek on BACKOFF, not a
   timer.** `captureClean(rects)` hides only cards over the regions being read
   (hiding all cards = every overlay blinking every ~2.5s — the wco.tv report).
