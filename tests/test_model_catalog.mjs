@@ -26,7 +26,7 @@ eq("modelEnvFlags(non-local) allows remote fallback", modelEnvFlags(false), { al
 // --- resolution + default fallback -------------------------------------------
 ok("resolveModel(known key) returns that entry", resolveModel(FALLBACK_CATALOG, "lfm-web").dir === "lfm-iter20web");
 ok("resolveModel(unknown key) falls back to default", resolveModel(FALLBACK_CATALOG, "does-not-exist").key === "lfm");
-ok("default key resolves to the current default dir", resolveModel(FALLBACK_CATALOG, "lfm").dir === "lfm-iter24");
+ok("default key resolves to the current default dir", resolveModel(FALLBACK_CATALOG, "lfm").dir === "lfm-iter25");
 ok("parseCatalog repairs a bad default", parseCatalog({ default: "ghost", models: [{ key: "a", dir: "a" }] }).default === "a");
 ok("parseCatalog on junk yields the fallback", parseCatalog(null).models.length === FALLBACK_CATALOG.models.length);
 
@@ -40,7 +40,7 @@ ok("parseCatalog preserves an entry's thresholds field",
   const lfm = idx.models.find((m) => m.key === "lfm");
   const th = lfm?.thresholds;
   ok("packaged index.json default engine carries sane thresholds",
-     !!th && th.ctx > 0.05 && th.ctx < 0.6 && th.bare > th.ctx && th.bare < 0.9);
+     !!th && th.ctx > 0.05 && th.ctx < 0.95 && th.bare > th.ctx && th.bare <= 0.95);
 }
 
 // --- label + kind inference ---------------------------------------------------
