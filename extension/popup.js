@@ -40,6 +40,9 @@ async function refreshStatus() {
     el.textContent = `downloading model… ${pct}%`;
     bar.style.display = "block";
     bar.firstElementChild.style.width = `${pct}%`;
+  } else if (info.state === "off") {
+    el.textContent = "blocking off — model unloaded";
+    bar.style.display = "none";
   } else if (info.state === "error") {
     el.textContent = `engine error: ${String(info.error).slice(0, 120)}`;
   } else {

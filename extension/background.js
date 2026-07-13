@@ -258,6 +258,32 @@ async function ensureOffscreen() {
   return offscreenReady;
 }
 
+// Fully unload the vision model by closing the offscreen document. The engine
+// holds ~1-2 GB (ORT session + WebGPU buffers); killing the document context is
+// the only teardown that guarantees the GPU memory is released.
+async function closeOffscreen() {
+  try {
+    if (await chrome.offscreen.hasDocument?.()) await chrome.offscreen.closeDocument();
+  } catch { /* already gone */ }
+  offscreenReady = null;
+}
+
+// "Block ads (all sites)" OFF -> unload the model entirely; back ON -> warm it
+// up again so the first page doesn't eat the whole cold-start.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !("enabled" in changes)) return;
+  if (changes.enabled.newValue === false) {
+    closeOffscreen();
+  } else {
+    (async () => {
+      try {
+        await ensureOffscreen();
+        askOffscreen({ type: "engine-status", engineKind: (await getSettings()).engineKind });
+      } catch { /* warm-up is best-effort */ }
+    })();
+  }
+});
+
 function askOffscreen(msg) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({ ...msg, target: "minus-offscreen" }, (resp) => {
@@ -317,8 +343,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const dataUrl = await captureTab(sender.tab?.windowId);
         sendResponse({ ok: true, dataUrl });
       } else if (msg.type === "minus:classify") {
+        const { threshold, engineKind, enabled } = await getSettings();
+        if (!enabled) { sendResponse({ ok: false, error: "blocking disabled" }); return; }
         await ensureOffscreen();
-        const { threshold, engineKind } = await getSettings();
         const resp = await askOffscreen({ type: "classify", images: msg.images, engineKind });
         if (!resp?.ok) throw new Error(resp?.error || "engine error");
         sendResponse({
@@ -365,10 +392,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await uploadDueSamples();
         sendResponse({ ok: true });
       } else if (msg.type === "minus:engine-status") {
-        await ensureOffscreen();
-        const { engineKind } = await getSettings();
-        const resp = await askOffscreen({ type: "engine-status", engineKind });
-        sendResponse(resp);
+        const { enabled, engineKind } = await getSettings();
+        if (!enabled) {
+          // blocking globally off -> model unloaded; don't resurrect the
+          // offscreen doc just because the popup polls for status
+          sendResponse({ ok: true, info: { state: "off" } });
+        } else {
+          await ensureOffscreen();
+          const resp = await askOffscreen({ type: "engine-status", engineKind });
+          sendResponse(resp);
+        }
       } else if (msg.type === "minus:onboarding-seen") {
         clearFirstRunHint();
         sendResponse({ ok: true });
@@ -391,6 +424,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // Warm the engine as soon as the browser starts the worker.
-ensureOffscreen()
-  .then(async () => askOffscreen({ type: "engine-status", engineKind: (await getSettings()).engineKind }))
-  .catch(() => {});
+getSettings().then((s) => {
+  if (!s.enabled) return; // user has blocking off -> keep the model unloaded
+  return ensureOffscreen().then(() => askOffscreen({ type: "engine-status", engineKind: s.engineKind }));
+}).catch(() => {});

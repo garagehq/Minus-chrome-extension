@@ -16,7 +16,7 @@ done
 # Extension-loading tests each get their OWN Chromium profile dir and a short
 # gap, so back-to-back runs never contend on the same user-data-dir lock
 # (the same reason run_all.sh sleeps between its tests).
-for t in test_popup_branding test_badge_counter; do
+for t in test_popup_branding test_badge_counter test_unload_on_disable; do
   echo "===== $t"
   MINUS_TEST_PROFILE="/home/ubuntu/.cache/minus-ext-profile-$t" node "tests/$t.mjs" || fail=1
   echo
