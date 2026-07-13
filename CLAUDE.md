@@ -70,6 +70,12 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
   self-heals ×3). Headless WebGPU needs `--enable-unsafe-webgpu
   --ignore-gpu-blocklist --use-angle=vulkan --enable-features=Vulkan
   --disable-vulkan-surface` and the full chromium build, not headless shell.
+- **Clean captures must be TARGETED.** `captureClean(rects)` hides only the
+  cards overlapping the regions being read; hiding all cards made every overlay
+  blink on the iframe sampler's ~2.5s cadence (the wco.tv "reappearing ads"
+  report — 30 visible flips per 25s). Pre-arm the capture rate limiter
+  (`minus:capture-wait`) BEFORE hiding; restore before image decode. Regression:
+  `tests/test_no_blink.mjs`.
 - **`pkill -f <pattern>` can match the invoking shell's own command line** and
   SIGTERM your session (exit 144). Kill by exact PID or `pkill -x chrome`.
 - Chrome caches the MV3 SW script in the profile — the harness scrubs
