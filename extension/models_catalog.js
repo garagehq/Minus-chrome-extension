@@ -11,7 +11,8 @@
 export const FALLBACK_CATALOG = {
   default: "lfm",
   models: [
-    { key: "lfm", dir: "lfm-iter25", kind: "lfm", label: "LFM Iter 25-web (default — mined hard-positive retrain)", thresholds: { ctx: 0.60, bare: 0.88 } },
+    { key: "lfm", dir: "lfm-iter26", kind: "lfm", label: "LFM Iter 26-web (default — self-promo hard-negative retrain)", thresholds: { ctx: 0.60, bare: 0.88 } },
+    { key: "lfm-iter25", dir: "lfm-iter25", kind: "lfm", label: "LFM Iter 25-web (previous default)", thresholds: { ctx: 0.60, bare: 0.88 } },
     { key: "lfm-iter24", dir: "lfm-iter24", kind: "lfm", label: "LFM Iter 24-web (previous default)", thresholds: { ctx: 0.35, bare: 0.75 } },
     { key: "lfm-iter21", dir: "lfm-iter21web", kind: "lfm", label: "LFM Iter 21-web (previous default)" },
     { key: "lfm-iter22", dir: "lfm-iter22web", kind: "lfm", label: "LFM Iter 22-web (experimental — higher web-ad recall)" },
