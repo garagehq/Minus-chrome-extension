@@ -26,7 +26,7 @@ eq("modelEnvFlags(non-local) allows remote fallback", modelEnvFlags(false), { al
 // --- resolution + default fallback -------------------------------------------
 ok("resolveModel(known key) returns that entry", resolveModel(FALLBACK_CATALOG, "lfm-web").dir === "lfm-iter20web");
 ok("resolveModel(unknown key) falls back to default", resolveModel(FALLBACK_CATALOG, "does-not-exist").key === "lfm");
-ok("default key resolves to the current default dir", resolveModel(FALLBACK_CATALOG, "lfm").dir === "lfm-iter26");
+ok("default key resolves to the current default dir", resolveModel(FALLBACK_CATALOG, "lfm").dir === "lfm-iter27b");
 ok("parseCatalog repairs a bad default", parseCatalog({ default: "ghost", models: [{ key: "a", dir: "a" }] }).default === "a");
 ok("parseCatalog on junk yields the fallback", parseCatalog(null).models.length === FALLBACK_CATALOG.models.length);
 
