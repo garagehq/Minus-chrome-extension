@@ -40,19 +40,22 @@ The engine list is generated from the packaged models (`models/index.json`), so
 dropping in a new model dir makes it selectable with no code changes. Switch in
 the popup (reloads the engine).
 
-**Per-engine decision thresholds** (v0.3.1): a catalog entry can carry
+**Per-engine decision thresholds** (since v0.3.1): a catalog entry can carry
 `"thresholds": { "ctx": …, "bare": … }` — the confidence bars content.js applies
-to ad-context elements (iframes / ad-slots) and bare standard-size images. The
-default Iter 24 engine ships tuned gates (0.35 / 0.75, vs the conservative
-0.60 / 0.88 fallback) because its score distribution separates ads from content
-cleanly (8/499 benchmark non-ads above p 0.3); a 60-minute live A/B measured
-**~33 % more ads covered at unchanged ~90 % precision**. Engines without the
-field keep the conservative defaults, and each new model ships its own operating
-point instead of inheriting a predecessor's.
+to ad-context elements (iframes / ad-slots) and bare standard-size images.
+Each model ships its own operating point instead of inheriting a predecessor's;
+the current default (Iter 27b) runs 0.60 / 0.88. When a model's score
+distribution separates ads cleanly, looser gates buy recall for free — the
+Iter 24 era shipped 0.35 / 0.75 and a 60-minute live A/B measured **~33 % more
+ads covered at unchanged ~90 % precision**.
 
 | Engine (`key`) | Model | Notes |
 |---|---|---|
-| **`lfm`** (default) | LFM2.5-VL-450M **Iter 24-web**, q4/q8 ONNX (~431 MB) | Content hard-negative retrain on the Iter 21 base — catches web-display ads with the **fewest content false-positives** of any iteration (live precision ~90%). Shipping default. **WebGPU only.** |
+| **`lfm`** (default) | LFM2.5-VL-450M **Iter 27b-web**, q4/q8 ONNX (~431 MB) | Chat-widget / site-header hard negatives + scale-jitter retrain — fewest production false-positives of any iteration (bench prod-FPs 9→4 at the CTX gate; Botsonic-widget and 9GAG-signup FPs fixed live). Shipping default. **WebGPU only.** |
+| `lfm-iter26` | LFM Iter 26-web | Previous default (v0.3.7, self-promo/UI negatives). WebGPU only. |
+| `lfm-iter27` | LFM Iter 27-web | Candidate superseded by 27b (fixed Botsonic, regressed 9GAG signup). WebGPU only. |
+| `lfm-iter25` | LFM Iter 25-web | Previous default (v0.3.2, mined hard-positive retrain). WebGPU only. |
+| `lfm-iter24` | LFM Iter 24-web | Previous default (v0.3.0, content hard-negatives, tuned 0.35/0.75 gates). WebGPU only. |
 | `lfm-iter21` | LFM Iter 21-web | Previous default. WebGPU only. |
 | `lfm-iter22` | LFM Iter 22-web | Experimental; higher web-ad recall (more content FPs). WebGPU only. |
 | `lfm-iter23` | LFM Iter 23-web | Content hard-negatives on the Iter 22 base (superseded by Iter 24). WebGPU only. |

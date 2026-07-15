@@ -28,7 +28,7 @@ of the `minus` HDMI device; models are trained in `/home/ubuntu/training`
 
 `CTX_BLOCK_P`/`BARE_BLOCK_P` default 0.60/0.88 but are **per-engine**: catalog
 entries may carry `thresholds: {ctx, bare}` (background resolves the active
-engine's entry and sends it with `minus:settings`). Iter 24 ships 0.35/0.75 —
+engine's entry and sends it with `minus:settings`). Iter 27b (default) ships 0.60/0.88; the Iter 24 era ran 0.35/0.75 —
 justified by benchmark separation, validated by a live A/B (+33 % coverage,
 precision held). New models should ship their own operating point; pick it from
 the PR-curve on `training/data/web_ad_bench` scores, never inherit 0.5 or a
