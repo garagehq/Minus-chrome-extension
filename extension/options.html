@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Minus — Options</title>
+  <style>
+    @font-face {
+      font-family: "VT323";
+      src: url("VT323.ttf") format("truetype");
+      font-display: block;
+    }
+    :root { --blue: #3b82f6; --ink: #cfe6ff; --panel: #0e1621; --line: #24425f; --muted: #6f8bab; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 36px 20px 60px;
+      background: #070b10; color: var(--ink);
+      font-family: "VT323", ui-monospace, monospace; font-size: 18px;
+      position: relative;
+    }
+    body::after {
+      content: ""; position: fixed; inset: 0; pointer-events: none;
+      background: repeating-linear-gradient(0deg, rgba(0,0,0,0.16) 0 1px, transparent 1px 3px);
+      mix-blend-mode: multiply;
+    }
+    .wrap { max-width: 680px; margin: 0 auto; }
+    .brand { text-align: center; margin: 0 0 8px; }
+    .brand .word { font-size: 56px; line-height: 1; color: var(--blue);
+      letter-spacing: 0.08em; text-shadow: 0 0 12px rgba(59,130,246,0.55); }
+    .tagline { text-align: center; color: var(--muted); margin-bottom: 34px; font-size: 17px; }
+
+    section { background: rgba(14,22,33,0.55); border: 1px solid var(--line);
+      border-radius: 4px; padding: 18px 22px 20px; margin-bottom: 22px; }
+    h2 { font-size: 22px; margin: 0 0 4px; color: #7fb0e6; letter-spacing: 0.08em;
+      text-transform: uppercase; font-weight: normal; }
+    .hint { color: var(--muted); font-size: 16px; margin: 0 0 14px; }
+
+    .row { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+    .row .rl { font-size: 19px; cursor: pointer; }
+    .sub { color: var(--muted); font-size: 15px; margin: -4px 0 4px 58px; }
+
+    label.field { display: block; font-size: 15px; margin: 14px 0 5px; letter-spacing: 0.08em;
+      text-transform: uppercase; color: #7fb0e6; }
+    select, input[type="text"], textarea {
+      width: 100%; background: var(--panel); border: 1px solid var(--line); color: var(--ink);
+      border-radius: 3px; padding: 7px 8px; font-family: "VT323", monospace; font-size: 17px;
+    }
+    select { cursor: pointer; }
+    textarea { min-height: 92px; resize: vertical; line-height: 1.45; }
+    input[type="radio"] { accent-color: var(--blue); width: 15px; height: 15px; cursor: pointer; }
+    input[type="range"] { width: 100%; accent-color: var(--blue); }
+
+    .toggle-switch { position: relative; display: inline-block; width: 46px; height: 22px; flex: 0 0 auto; }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider { position: absolute; cursor: pointer; inset: 0;
+      background: var(--panel); border: 1px solid var(--line); transition: 0.3s; }
+    .toggle-slider::before { position: absolute; content: ""; height: 16px; width: 16px; left: 2px; bottom: 2px;
+      background: #5b7fa6; transition: 0.3s; }
+    .toggle-switch input:checked + .toggle-slider { background: transparent; border-color: var(--blue); }
+    .toggle-switch input:checked + .toggle-slider::before { transform: translateX(26px);
+      background: var(--blue); box-shadow: 0 0 10px var(--blue); }
+
+    /* live preview of the overlay card, matching overlay.css's look */
+    .preview { margin-top: 16px; height: 190px; border-radius: 4px; position: relative;
+      background: #0a0f16; border: 1px dashed var(--line); overflow: hidden;
+      display: flex; align-items: center; justify-content: center; flex-direction: column;
+      text-align: center; padding: 14px; }
+    .preview .pv-brand { position: absolute; left: 10px; bottom: 8px; color: #4ade80;
+      font-size: 15px; letter-spacing: 0.12em; }
+    .preview .pv-p { position: absolute; right: 10px; bottom: 8px; color: #56708f; font-size: 14px; }
+    .preview .pv-w { font-size: 34px; color: #6ee7a8; }
+    .preview .pv-en { font-size: 19px; color: #9fb9d8; margin-top: 4px; }
+    .preview .pv-ex { font-size: 16px; color: #6f8bab; font-style: italic; margin-top: 10px; }
+    .preview .pv-x { position: absolute; top: 8px; right: 10px; color: #56708f; font-size: 20px; }
+
+    .foot { text-align: center; color: var(--muted); margin-top: 30px; font-size: 16px; }
+    .foot a { color: var(--muted); }
+    .foot a:hover { color: var(--blue); }
+    #saved { color: #6fd39a; text-align: center; min-height: 20px; margin-top: 10px; }
+    #saved::before { content: "> "; color: var(--blue); }
+    #engineStatus { color: var(--muted); font-size: 15px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand"><span class="word">Minus</span></div>
+    <div class="tagline">a vision model looks at the page and covers the ads — nothing leaves your machine</div>
+
+    <section>
+      <h2>Blocking</h2>
+      <p class="hint">What gets scanned and covered.</p>
+      <div class="row">
+        <label class="toggle-switch"><input type="checkbox" id="enabled"><span class="toggle-slider"></span></label>
+        <label for="enabled" class="rl">Block ads (all sites)</label>
+      </div>
+      <div class="row">
+        <label class="toggle-switch"><input type="checkbox" id="blockDisplay"><span class="toggle-slider"></span></label>
+        <label for="blockDisplay" class="rl">Block display / banner ads</label>
+      </div>
+      <div class="row">
+        <label class="toggle-switch"><input type="checkbox" id="blockVideo"><span class="toggle-slider"></span></label>
+        <label for="blockVideo" class="rl">Block video ads</label>
+      </div>
+    </section>
+
+    <section>
+      <h2>Block action</h2>
+      <p class="hint">What appears on top of a blocked ad.</p>
+      <div class="row">
+        <input type="radio" name="blockAction" id="actFlash" value="flashcards">
+        <label for="actFlash" class="rl">Language flashcards — learn a word instead of seeing an ad</label>
+      </div>
+      <div class="row">
+        <input type="radio" name="blockAction" id="actMinimal" value="minimal">
+        <label for="actMinimal" class="rl">Minimal — a quiet “blocked by minus” card</label>
+      </div>
+      <label class="field" for="blockLang">Flashcard language</label>
+      <select id="blockLang"></select>
+      <div class="row" style="margin-top:8px">
+        <label class="toggle-switch"><input type="checkbox" id="showConfidence"><span class="toggle-slider"></span></label>
+        <label for="showConfidence" class="rl">Show the model's confidence (“ad 97%”) on each card</label>
+      </div>
+      <div class="preview" id="preview">
+        <div class="pv-x">×</div>
+        <div class="pv-w" id="pvW"></div>
+        <div class="pv-en" id="pvEn"></div>
+        <div class="pv-ex" id="pvEx"></div>
+        <div class="pv-brand">minus</div>
+        <div class="pv-p" id="pvP">ad 97%</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Engine</h2>
+      <p class="hint">The vision model that decides what's an ad. Each model ships its own decision thresholds.</p>
+      <label class="field" for="engineKind">Model</label>
+      <select id="engineKind"></select>
+      <div id="engineStatus"></div>
+    </section>
+
+    <section>
+      <h2>Sites</h2>
+      <p class="hint">Blocking is off on these hostnames (one per line). The popup's per-site toggle edits this list too.</p>
+      <textarea id="disabledSites" placeholder="example.com&#10;news.site.org" spellcheck="false"></textarea>
+    </section>
+
+    <section>
+      <h2>Privacy</h2>
+      <div class="row">
+        <label class="toggle-switch"><input type="checkbox" id="collect"><span class="toggle-slider"></span></label>
+        <label for="collect" class="rl">Help minus get smarter — contribute anonymous snapshots of blocked ads</label>
+      </div>
+      <p class="hint" style="margin:2px 0 0 58px">Off by default. Only the blocked element's image is sent (never the page, never your identity); clicking ✕ on an overlay retracts its snapshot.</p>
+    </section>
+
+    <div id="saved"></div>
+    <div class="foot">
+      <span id="ver"></span> ·
+      <a href="https://github.com/garagehq/Minus-chrome-extension" target="_blank" rel="noopener">source ↗</a> ·
+      <a href="https://buymeacoffee.com/cyrilengmann" target="_blank" rel="noopener">☕ buy me a coffee</a>
+    </div>
+  </div>
+  <script src="spanish.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

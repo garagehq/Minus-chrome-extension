@@ -53,6 +53,9 @@
   let enabled = true;
   let blockVideo = true, blockDisplay = true; // per-type toggles (popup)
   let collectOptIn = false;                // anonymous snapshot contribution
+  // Block-action appearance (options page): flashcards in a chosen language,
+  // or a minimal "blocked" card. Confidence tag is toggleable.
+  let blockAction = "flashcards", blockLang = "es", showConfidence = true;
   const allowed = new WeakSet();           // user clicked X
   const sampleKeys = new WeakMap();        // element -> queued sample key (for retraction)
   const verdictCache = new Map();          // signature -> is_ad
@@ -90,6 +93,9 @@
       collectOptIn = !!resp.settings.collectOptIn;
       blockVideo = resp.settings.blockVideo !== false;
       blockDisplay = resp.settings.blockDisplay !== false;
+      if (resp.settings.blockAction) blockAction = resp.settings.blockAction;
+      if (resp.settings.blockLang) blockLang = resp.settings.blockLang;
+      showConfidence = resp.settings.showConfidence !== false;
       const th = resp.settings.engineThresholds;
       if (th) {
         if (typeof th.ctx === "number" && th.ctx > 0 && th.ctx < 1) CTX_BLOCK_P = th.ctx;
@@ -109,6 +115,17 @@
       const kind = div.dataset.minusKind;
       if ((kind === "video" && !blockVideo) || (kind === "display" && !blockDisplay)) {
         div.remove(); overlays.delete(el);
+      }
+    }
+    // Block-action appearance changed in the options page: re-render live
+    // overlays in place (no reload, keeps position/occlusion state).
+    if ("blockAction" in changes || "blockLang" in changes || "showConfidence" in changes) {
+      if ("blockAction" in changes) blockAction = changes.blockAction.newValue || "flashcards";
+      if ("blockLang" in changes) blockLang = changes.blockLang.newValue || "es";
+      if ("showConfidence" in changes) showConfidence = changes.showConfidence.newValue !== false;
+      for (const [el, div] of overlays) {
+        const p = div.dataset.minusP ? parseFloat(div.dataset.minusP) : null;
+        renderCard(el, div, Number.isFinite(p) ? p : null);
       }
     }
     reportBlocked();
@@ -416,19 +433,29 @@
   // ---------------------------------------------------------------- overlay
   // kind: "display" (static img/iframe/ad-slot) or "video" (in-player / playing
   // iframe). Stored on the overlay so a popup type-toggle can clear it live.
-  function block(el, pAd, kind = "display") {
-    if (overlays.has(el) || allowed.has(el)) return;
-    const card = MINUS_SPANISH[Math.floor(Math.random() * MINUS_SPANISH.length)];
-    const div = document.createElement("div");
-    div.setAttribute("data-minus-overlay", "");
-    div.dataset.minusKind = kind;
-    div.innerHTML = `
+  // Card body per the configured block action (options page). The X button is
+  // (re)wired by renderCard so a live style switch keeps reveal working.
+  function renderCard(el, div, pAd) {
+    const pTag = pAd != null && showConfidence
+      ? `<div class="minus-p">ad ${(pAd * 100).toFixed(0)}%</div>` : "";
+    if (blockAction === "minimal") {
+      div.innerHTML = `
       <button class="minus-x" title="Show this ad">&times;</button>
       <div class="minus-brand">minus</div>
-      <div class="minus-es">${card.es}</div>
+      <div class="minus-es">ad blocked</div>
+      <div class="minus-ex">This ad has been blocked by minus.</div>
+      ${pTag}`;
+    } else {
+      const deck = (typeof MINUS_DECKS !== "undefined" && MINUS_DECKS[blockLang]) || MINUS_SPANISH;
+      const card = deck[Math.floor(Math.random() * deck.length)];
+      div.innerHTML = `
+      <button class="minus-x" title="Show this ad">&times;</button>
+      <div class="minus-brand">minus</div>
+      <div class="minus-es">${card.w ?? card.es}</div>
       <div class="minus-en">${card.en}</div>
       <div class="minus-ex">${card.ex}</div>
-      ${pAd != null ? `<div class="minus-p">ad ${(pAd * 100).toFixed(0)}%</div>` : ""}`;
+      ${pTag}`;
+    }
     div.querySelector(".minus-x").addEventListener("click", (e) => {
       e.stopPropagation();
       allowed.add(el);
@@ -439,6 +466,15 @@
       const key = sampleKeys.get(el);
       if (key) chrome.runtime.sendMessage({ type: "minus:retract-sample", key });
     });
+  }
+
+  function block(el, pAd, kind = "display") {
+    if (overlays.has(el) || allowed.has(el)) return;
+    const div = document.createElement("div");
+    div.setAttribute("data-minus-overlay", "");
+    div.dataset.minusKind = kind;
+    if (pAd != null) div.dataset.minusP = String(pAd);
+    renderCard(el, div, pAd);
     document.documentElement.appendChild(div);
     overlays.set(el, div);
     positionOverlay(el, div);

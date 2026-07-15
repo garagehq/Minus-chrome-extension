@@ -10,6 +10,9 @@ const DEFAULTS = {
   engineKind: "lfm",
   blockVideo: true,                  // cover video ads (in-player / iframe)
   blockDisplay: true,                // cover static display ads (img / iframe / ad-slot)
+  blockAction: "flashcards",         // overlay style: "flashcards" | "minimal"
+  blockLang: "es",                   // flashcard deck language (MINUS_DECKS key)
+  showConfidence: true,              // show the "ad NN%" tag on overlays
   collectOptIn: false,               // anonymous ad-snapshot contribution (opt-in)
   // Pre-wired ingest endpoint so opting in just works. Collection still requires
   // collectOptIn=true (per-user, off by default), so nothing sends until a user

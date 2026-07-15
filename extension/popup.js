@@ -132,4 +132,8 @@ for (const id of ["enabled", "collect", "blockVideo", "blockDisplay", "threshold
   document.getElementById(id).addEventListener("change", saveGeneral);
 }
 document.getElementById("siteEnabled").addEventListener("change", saveSite);
+document.getElementById("optionsLink").addEventListener("click", (e) => {
+  e.preventDefault();
+  chrome.runtime.openOptionsPage();
+});
 load();

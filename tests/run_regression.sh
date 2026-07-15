@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.." || exit 1
 fail=0
 
 # Pure / self-contained (no extension profile).
-for t in test_model_catalog test_overlay_occlusion test_power_pref_strip test_gpu_recovery_unit; do
+for t in test_model_catalog test_overlay_occlusion test_power_pref_strip test_gpu_recovery_unit test_options_decks; do
   echo "===== $t"
   node "tests/$t.mjs" || fail=1
   echo

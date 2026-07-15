@@ -23,7 +23,7 @@ telemetry. The model *sees* what you see.
 
 ## The popup (left-click the icon)
 
-Everything lives in one styled panel — there is **no right-click menu**:
+The quick panel:
 
 - **Ads blocked on this page** counter (mirrors the toolbar badge; the M icon is
   blue at rest, red while blocking).
@@ -33,6 +33,22 @@ Everything lives in one styled panel — there is **no right-click menu**:
   live, no reload).
 - **Ad threshold**, **Engine** picker, live engine status.
 - **Contribute anonymous ad snapshots** — opt-in, off by default (see Privacy).
+- **⚙ options** — opens the full options page.
+
+## The options page (⚙ in the popup, or right-click the icon → Options)
+
+A full-page superset of the popup, plus settings that only live here:
+
+- **Block action** — what appears over a blocked ad:
+  - **Language flashcards** (default) in **Spanish, French, German, Italian,
+    Portuguese, or Japanese** — every blocked ad becomes a vocabulary card
+    (word → translation → example sentence), with a live preview.
+  - **Minimal** — a quiet dark card that just says the ad was blocked.
+  - Toggle the **model-confidence tag** ("ad 97%") shown on each card.
+  - Changes apply to overlays already on screen — no reload.
+- **Disabled-sites list** — edit the per-site blocking list as text (the
+  popup's per-site toggle writes the same list).
+- **Engine picker** with each model's decision gates, live engine status.
 
 ## Engines
 
