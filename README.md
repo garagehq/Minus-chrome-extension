@@ -41,8 +41,9 @@ A full-page superset of the popup, plus settings that only live here:
 
 - **Block action** — what appears over a blocked ad:
   - **Language flashcards** (default) in **Spanish, French, German, Italian,
-    Portuguese, or Japanese** — every blocked ad becomes a vocabulary card
-    (word → translation → example sentence), with a live preview.
+    Portuguese, or Japanese** — a **500-word deck per language** (`decks/*.json`),
+    every blocked ad becomes a vocabulary card (word → translation → example
+    sentence), with a live preview.
   - **Minimal** — a quiet dark card that just says the ad was blocked.
   - Toggle the **model-confidence tag** ("ad 97%") shown on each card.
   - Changes apply to overlays already on screen — no reload.

@@ -32,6 +32,21 @@ for (const [lang, deck] of Object.entries(MINUS_DECKS)) {
 ok("es deck keeps its full 20 cards", MINUS_DECKS.es.length === 20, String(MINUS_DECKS.es.length));
 ok("MINUS_SPANISH back-compat alias points at the es deck", MINUS_SPANISH === MINUS_DECKS.es);
 
+// Full 500-card JSON decks (decks/<lang>.json) — the shipped decks.
+for (const lang of Object.keys(MINUS_LANGS)) {
+  let deck;
+  try { deck = JSON.parse(readFileSync(join(EXT, "decks", `${lang}.json`), "utf8")); }
+  catch (e) { ok(`decks/${lang}.json parses`, false, String(e).slice(0, 80)); continue; }
+  ok(`decks/${lang}.json has exactly 500 cards`, deck.length === 500, String(deck.length));
+  ok(`decks/${lang}.json: every card has non-empty w/en/ex`,
+     deck.every((c) => c.w?.trim() && c.en?.trim() && c.ex?.trim()));
+  ok(`decks/${lang}.json: all words unique`, new Set(deck.map((c) => c.w)).size === deck.length);
+  ok(`decks/${lang}.json: built-in starter cards lead the deck`,
+     JSON.stringify(deck.slice(0, MINUS_DECKS[lang].length).map((c) => c.w)) ===
+     JSON.stringify(MINUS_DECKS[lang].map((c) => c.w)));
+}
+ok("spanish.js exposes the JSON deck loader", deckSrc.includes("function minusLoadDeck"));
+
 // Options page wiring
 const manifest = JSON.parse(readFileSync(join(EXT, "manifest.json"), "utf8"));
 ok("manifest exposes options_ui.page = options.html", manifest.options_ui?.page === "options.html");
@@ -53,6 +68,9 @@ for (const key of ["blockAction", "blockLang", "showConfidence"]) {
 }
 const content = readFileSync(join(EXT, "content.js"), "utf8");
 ok("content.js reads blockAction from settings", content.includes("resp.settings.blockAction"));
+ok("content.js loads the JSON deck on settings + language change", content.includes("loadActiveDeck()"));
+const manifestRaw = readFileSync(join(EXT, "manifest.json"), "utf8");
+ok("manifest exposes decks/*.json as web-accessible", manifestRaw.includes("decks/*.json"));
 ok("content.js re-renders overlays on block-action change", content.includes('"blockAction" in changes'));
 ok("content.js minimal card exists", content.includes("This ad has been blocked by minus."));
 

@@ -56,6 +56,14 @@
   // Block-action appearance (options page): flashcards in a chosen language,
   // or a minimal "blocked" card. Confidence tag is toggleable.
   let blockAction = "flashcards", blockLang = "es", showConfidence = true;
+  // Full 500-card JSON deck, loaded async; the built-in starter deck serves
+  // until it arrives (and forever if the fetch fails).
+  let activeDeck = null;
+  function loadActiveDeck() {
+    if (typeof minusLoadDeck !== "function") return;
+    const want = blockLang;
+    minusLoadDeck(want).then((d) => { if (want === blockLang) activeDeck = d; }).catch(() => {});
+  }
   const allowed = new WeakSet();           // user clicked X
   const sampleKeys = new WeakMap();        // element -> queued sample key (for retraction)
   const verdictCache = new Map();          // signature -> is_ad
@@ -96,6 +104,7 @@
       if (resp.settings.blockAction) blockAction = resp.settings.blockAction;
       if (resp.settings.blockLang) blockLang = resp.settings.blockLang;
       showConfidence = resp.settings.showConfidence !== false;
+      loadActiveDeck();
       const th = resp.settings.engineThresholds;
       if (th) {
         if (typeof th.ctx === "number" && th.ctx > 0 && th.ctx < 1) CTX_BLOCK_P = th.ctx;
@@ -121,7 +130,7 @@
     // overlays in place (no reload, keeps position/occlusion state).
     if ("blockAction" in changes || "blockLang" in changes || "showConfidence" in changes) {
       if ("blockAction" in changes) blockAction = changes.blockAction.newValue || "flashcards";
-      if ("blockLang" in changes) blockLang = changes.blockLang.newValue || "es";
+      if ("blockLang" in changes) { blockLang = changes.blockLang.newValue || "es"; activeDeck = null; loadActiveDeck(); }
       if ("showConfidence" in changes) showConfidence = changes.showConfidence.newValue !== false;
       for (const [el, div] of overlays) {
         const p = div.dataset.minusP ? parseFloat(div.dataset.minusP) : null;
@@ -446,7 +455,8 @@
       <div class="minus-ex">This ad has been blocked by minus.</div>
       ${pTag}`;
     } else {
-      const deck = (typeof MINUS_DECKS !== "undefined" && MINUS_DECKS[blockLang]) || MINUS_SPANISH;
+      const deck = activeDeck
+        || (typeof MINUS_DECKS !== "undefined" && MINUS_DECKS[blockLang]) || MINUS_SPANISH;
       const card = deck[Math.floor(Math.random() * deck.length)];
       div.innerHTML = `
       <button class="minus-x" title="Show this ad">&times;</button>

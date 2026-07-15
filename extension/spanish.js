@@ -99,3 +99,20 @@ const MINUS_DECKS = {
 const MINUS_LANGS = { es: "Spanish", fr: "French", de: "German", it: "Italian", pt: "Portuguese", ja: "Japanese" };
 // Back-compat alias (content.js historically read MINUS_SPANISH).
 const MINUS_SPANISH = MINUS_DECKS.es;
+
+// Load the full 500-card JSON deck for a language (decks/<lang>.json,
+// web-accessible so content scripts can fetch it). Falls back to the built-in
+// starter deck above on any failure; results are cached per language.
+const MINUS_DECK_CACHE = {};
+function minusLoadDeck(lang) {
+  if (!MINUS_DECKS[lang]) lang = "es";
+  if (MINUS_DECK_CACHE[lang]) return Promise.resolve(MINUS_DECK_CACHE[lang]);
+  return fetch(chrome.runtime.getURL(`decks/${lang}.json`))
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then((deck) => {
+      if (!Array.isArray(deck) || !deck.length) throw new Error("bad deck");
+      MINUS_DECK_CACHE[lang] = deck;
+      return deck;
+    })
+    .catch(() => MINUS_DECKS[lang]);
+}

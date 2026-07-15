@@ -24,14 +24,14 @@ async function set(patch) {
 }
 
 // ---- block-action preview ---------------------------------------------------
-function renderPreview(s) {
+async function renderPreview(s) {
   const minimal = s.blockAction === "minimal";
   if (minimal) {
     $("pvW").textContent = "ad blocked";
     $("pvEn").textContent = "";
     $("pvEx").textContent = "This ad has been blocked by minus.";
   } else {
-    const deck = MINUS_DECKS[s.blockLang] || MINUS_DECKS.es;
+    const deck = await minusLoadDeck(s.blockLang);
     const card = deck[Math.floor(Math.random() * deck.length)];
     $("pvW").textContent = card.w;
     $("pvEn").textContent = card.en;
@@ -94,7 +94,7 @@ async function load() {
   for (const [code, name] of Object.entries(MINUS_LANGS)) {
     const o = document.createElement("option");
     o.value = code;
-    o.textContent = `${name} (${MINUS_DECKS[code].length} cards)`;
+    o.textContent = `${name} (${(await minusLoadDeck(code)).length} cards)`;
     langSel.appendChild(o);
   }
   langSel.value = s.blockLang in MINUS_DECKS ? s.blockLang : "es";

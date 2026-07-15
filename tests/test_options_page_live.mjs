@@ -37,15 +37,21 @@ await opts.goto(`chrome-extension://${extId}/options.html`, { waitUntil: "domcon
 ok("options page renders (brand + sections)", await opts.evaluate(() =>
   document.querySelector(".brand")?.textContent.includes("Minus") &&
   document.querySelectorAll("section").length >= 5));
+// dropdowns populate async (deck JSON fetches) — wait for load() to finish
+await opts.waitForFunction(() =>
+  document.getElementById("engineKind").options.length >= 3 &&
+  document.getElementById("blockLang").options.length >= 2, { timeout: 20000 });
 ok("engine dropdown populated from index.json", await opts.evaluate(() =>
   document.getElementById("engineKind").options.length >= 3));
 ok("language dropdown lists all decks", await opts.evaluate(() =>
   document.getElementById("blockLang").options.length === Object.keys(MINUS_DECKS).length));
+ok("dropdown labels show 500-card counts", await opts.evaluate(() =>
+  [...document.getElementById("blockLang").options].every((o) => o.textContent.includes("(500 cards)"))));
 
 // 3. switch language → French; live overlay should re-render with a French card
 await opts.selectOption("#blockLang", "fr");
 await page.waitForTimeout(700);
-const frWords = await opts.evaluate(() => MINUS_DECKS.fr.map((c) => c.w));
+const frWords = await opts.evaluate(async () => (await minusLoadDeck("fr")).map((c) => c.w));
 const t1 = await overlayText();
 ok("overlay re-rendered with a French card", frWords.some((w) => t1.includes(w)), t1.slice(0, 80));
 
