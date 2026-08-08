@@ -58,6 +58,15 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
 
 ## Hard-won gotchas (do not relearn these)
 
+- **Switching engines mid-run wedges the WebGPU engine (KNOWN BUG, unfixed).**
+  `getEngine` on a new `engineKind` calls `resetEngine` and rebuilds — but the
+  new WebGPU device gets created before the old one is fully disposed, and on
+  Tegra this contends and hangs the load in `state:"loading"` indefinitely (seen
+  Iter 28: default iter27b → iter28 switch stuck 5+ min, 0 caps). Workaround for
+  testing a candidate: make it the DEFAULT so the background warms it directly
+  (no switch) — a fresh default-path load is clean. Real users hitting the popup
+  engine dropdown can still trip this; the fix is to await full teardown of the
+  old session before creating the new device. Not yet done.
 - **Playwright evaluates on MV3 contexts HANG, not reject.** Chrome idle-kills
   the extension SW; an evaluate on a stale handle blocks forever, and a wedged
   renderer does the same for page/frame evaluates. Every SW poll must re-acquire
