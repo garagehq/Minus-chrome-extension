@@ -307,25 +307,48 @@ let loadedEngineKey = null;
 function isFatalGpuError(e) {
   return /Instance reference no longer exists|failed to call OrtRun|mapAsync|device (is )?lost|buffer_manager|Failed to download data from buffer|GPUDevice|Device lost/i.test(String(e));
 }
+// Disposal of a dead/old engine's WebGPU device must FINISH before a new device
+// is created — otherwise the two contend and the new load wedges in "loading"
+// forever (Tegra device-teardown race; the recurring stuck-loading bug). We
+// stash the disposal promise and make getEngine await it before rebuilding.
+let disposalDone = null;
+function disposeOld(old) {
+  disposalDone = Promise.resolve(old)
+    .then((eng) => { try { eng?.model?.dispose?.(); } catch {} })
+    .catch(() => {})
+    .then(() => new Promise((r) => setTimeout(r, 250))); // let the GPU device fully tear down
+  return disposalDone;
+}
 function resetEngine() {
   const old = enginePromise;
   enginePromise = null;
   loadedEngineKey = null;
   engineInfo = { state: "cold" };
-  // best-effort free the dead session's resources (may itself throw on a lost device)
-  Promise.resolve(old).then((eng) => { try { eng?.model?.dispose?.(); } catch {} }).catch(() => {});
+  disposeOld(old);
 }
 
 async function getEngine(engineKind = "lfm") {
   const catalog = await getCatalog();
   const entry = resolveModel(catalog, engineKind);
   if (enginePromise && loadedEngineKey !== entry.key) {
+    // Engine switch: dispose the previous device before creating the new one.
+    const old = enginePromise;
     enginePromise = null;
     engineInfo = { state: "cold" };
+    disposeOld(old);
   }
+  // Any pending disposal (from a switch or a device-loss reset) must complete
+  // before we spin up a fresh device.
+  if (disposalDone) { const d = disposalDone; disposalDone = null; await d; }
   if (!enginePromise) {
     loadedEngineKey = entry.key;
-    enginePromise = (async () => (entry.kind === "siglip2" ? loadSiglip2Engine(entry) : loadEngine(entry)))()
+    enginePromise = (async () => Promise.race([
+      (entry.kind === "siglip2" ? loadSiglip2Engine(entry) : loadEngine(entry)),
+      // A WebGPU load that never resolves (Tegra device wedge after a reset)
+      // would leave the engine stuck "loading" forever, silently blocking
+      // nothing. Time it out so the next classify/status triggers a clean retry.
+      new Promise((_, rej) => setTimeout(() => rej(new Error("engine load timeout")), 90000)),
+    ]))()
       .catch((e) => {
         enginePromise = null;
         loadedEngineKey = null;

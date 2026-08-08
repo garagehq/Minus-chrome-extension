@@ -58,15 +58,30 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
 
 ## Hard-won gotchas (do not relearn these)
 
-- **Switching engines mid-run wedges the WebGPU engine (KNOWN BUG, unfixed).**
-  `getEngine` on a new `engineKind` calls `resetEngine` and rebuilds — but the
-  new WebGPU device gets created before the old one is fully disposed, and on
-  Tegra this contends and hangs the load in `state:"loading"` indefinitely (seen
-  Iter 28: default iter27b → iter28 switch stuck 5+ min, 0 caps). Workaround for
-  testing a candidate: make it the DEFAULT so the background warms it directly
-  (no switch) — a fresh default-path load is clean. Real users hitting the popup
-  engine dropdown can still trip this; the fix is to await full teardown of the
-  old session before creating the new device. Not yet done.
+- **Only the ACTIVE tab may scan.** `chrome.tabs.captureVisibleTab(windowId)`
+  ALWAYS returns the *active* tab's pixels — a background/other tab that captured
+  would crop its own element coordinates against the wrong image (mis-scaled
+  overlays + phantom false-positives: the multi-tab scaling bug). The background
+  refuses `minus:capture` AND `minus:classify` from any sender whose
+  `sender.tab.active !== true`; content.js also gates all scan loops on
+  `document.hidden` + a `visibilitychange` listener. Net: a backgrounded tab
+  never fights the single shared engine or the capture rate limiter.
+- **`captureVisibleTab` can HANG (not reject), and captures are serialized.**
+  When the active tab is mid-navigation or a sibling tab just closed, the capture
+  promise may never settle. Because `captureTab` funnels all captures through one
+  `captureInflight`, a single hang wedges EVERY future capture — display scans
+  silently stop while only the direct-read `<video>` path survives (the "0
+  display overlays after multi-tab churn" bug). Fix: `captureTab` races a 2.5 s
+  timeout so a stuck capture fails fast.
+- **Engine reset → reload races the GPU device teardown (Tegra).** On WebGPU
+  device loss, `resetEngine` rebuilds on a fresh device — but if the new device
+  is created before the old one finishes disposing, the two contend and the load
+  wedges in `state:"loading"` forever (blocks nothing). Fix: `disposeOld` stashes
+  the disposal promise (+250 ms settle) and `getEngine` AWAITS it before creating
+  the new device; a 90 s load timeout self-recovers a genuinely hung load. This
+  also fixes the mid-run engine-switch wedge (popup engine dropdown). Do NOT add
+  an idle-unload timer — it churns reset→reload and reintroduces the wedge on
+  Tegra (tried in Iter 28, reverted).
 - **Playwright evaluates on MV3 contexts HANG, not reject.** Chrome idle-kills
   the extension SW; an evaluate on a stale handle blocks forever, and a wedged
   renderer does the same for page/frame evaluates. Every SW poll must re-acquire
@@ -112,8 +127,18 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
 
 ## Testing conventions
 
-- `npm test` = catalog/occlusion/powerPref/branding/badge suites — keep green;
-  extension-loading tests get their own profile dirs to avoid lock contention.
+- `npm test` = catalog/occlusion/powerPref/branding/badge/options suites — keep
+  green; extension-loading tests get their own profile dirs to avoid lock contention.
+- **`tests/e2e_headed_multitab.mjs` = the real headed e2e** (Xvfb + full Chromium,
+  NOT headless). Phase 1 multi-tab active-only (background tabs must produce 0
+  captures), Phase 2 video block→UNBLOCK (covered ad must uncover on end /
+  content-swap / pause), Phase 3 rotates one active tab through 100+ ad-heavy +
+  video sites (2 idle bg tabs held open) and asserts real captures + overlays on
+  many sites + engine stays `ready`. The background carries `globalThis.__minusCap*/
+  __minusCls*` counters the harness reads. `probe_capture_guard.mjs` /
+  `probe_phase3.mjs` are fast diagnostics. Run: `DISPLAY=:99 node tests/e2e_headed_multitab.mjs [nSites]`.
+  Launch is self-healing (Tegra WebGPU cold-launch flakes ~50% — relaunches until
+  the engine reports ready).
 - Soaks write per-site coverage + captured crops to `tests/screenshots/<tag>/`;
   review crops as contact sheets before drawing precision conclusions.
 - Live-soak precision ≥80 % is the ship bar for engine/threshold changes;

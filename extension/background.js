@@ -308,12 +308,21 @@ async function captureTab(windowId) {
   captureInflight = (async () => {
     if (wait) await new Promise((r) => setTimeout(r, wait));
     try {
-      return await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
+      // captureVisibleTab can HANG (not reject) when the active tab is mid-
+      // navigation or a sibling tab just closed — and because captures are
+      // serialized through captureInflight, one hang would wedge EVERY future
+      // capture (display scans silently stop; only the direct-read video path
+      // survives — the "0 display overlays after multi-tab churn" bug). Race a
+      // timeout so a stuck capture fails fast and the next one proceeds.
+      return await Promise.race([
+        chrome.tabs.captureVisibleTab(windowId, { format: "png" }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("capture timeout")), 2500)),
+      ]);
     } finally {
       lastCaptureAt = Date.now();
       captureInflight = null;
     }
-  })();
+  })().catch(() => null);
   return captureInflight;
 }
 
@@ -343,19 +352,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     try {
       if (msg.type === "minus:capture") {
-        const dataUrl = await captureTab(sender.tab?.windowId);
+        // captureVisibleTab ALWAYS returns the active tab's pixels for the
+        // window. A background/inactive tab that captured would crop its own
+        // element coordinates against the wrong image — mis-scaled overlays and
+        // phantom false-positives (the multi-tab scaling bug). Only the tab that
+        // is active in its window may capture.
+        const tab = sender.tab;
+        if (!tab || tab.active !== true) {
+          globalThis.__minusCapRefused = (globalThis.__minusCapRefused || 0) + 1;
+          globalThis.__minusLastRefusedActive = tab ? tab.active : "no-tab";
+          sendResponse({ ok: false, notActive: true }); return;
+        }
+        globalThis.__minusCapOk = (globalThis.__minusCapOk || 0) + 1;
+        const dataUrl = await captureTab(tab.windowId);
         sendResponse({ ok: true, dataUrl });
       } else if (msg.type === "minus:classify") {
         const { threshold, engineKind, enabled } = await getSettings();
         if (!enabled) { sendResponse({ ok: false, error: "blocking disabled" }); return; }
+        // Only classify for the active tab — a background tab must never drive
+        // the engine (it would fight the active tab for the model and the
+        // capture rate limiter). Sub-frame senders carry the parent tab's active
+        // flag, so this also covers iframes.
+        if (sender.tab && sender.tab.active !== true) { globalThis.__minusClsRefused = (globalThis.__minusClsRefused || 0) + 1; sendResponse({ ok: false, notActive: true }); return; }
         await ensureOffscreen();
         const resp = await askOffscreen({ type: "classify", images: msg.images, engineKind });
         if (!resp?.ok) throw new Error(resp?.error || "engine error");
-        sendResponse({
-          ok: true,
-          results: resp.results.map((r) => ({ ...r, is_ad: r.p_ad >= threshold })),
-          engine: resp.engine,
-        });
+        const mapped = resp.results.map((r) => ({ ...r, is_ad: r.p_ad >= threshold }));
+        globalThis.__minusClsCalls = (globalThis.__minusClsCalls || 0) + 1;
+        globalThis.__minusClsImgs = (globalThis.__minusClsImgs || 0) + mapped.length;
+        globalThis.__minusAdsFound = (globalThis.__minusAdsFound || 0) + mapped.filter((r) => r.is_ad).length;
+        globalThis.__minusMaxP = Math.max(globalThis.__minusMaxP || 0, ...mapped.map((r) => r.p_ad || 0));
+        if (mapped.some((r) => r.is_ad)) {
+          const h = sender.tab?.url ? new URL(sender.tab.url).hostname.replace(/^www\./, "") : "?";
+          globalThis.__minusAdHosts = globalThis.__minusAdHosts || {};
+          globalThis.__minusAdHosts[h] = (globalThis.__minusAdHosts[h] || 0) + mapped.filter((r) => r.is_ad).length;
+        }
+        sendResponse({ ok: true, results: mapped, engine: resp.engine });
       } else if (msg.type === "minus:settings") {
         const settings = await getSettings();
         const host = sender.tab?.url ? new URL(sender.tab.url).hostname : "";

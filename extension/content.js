@@ -68,7 +68,7 @@
   const sampleKeys = new WeakMap();        // element -> queued sample key (for retraction)
   const verdictCache = new Map();          // signature -> is_ad
   const overlays = new Map();              // element -> overlay div
-  const videoState = new WeakMap();        // video -> {adVotes, nonAdVotes, blocked}
+  const videoState = new Map();            // video element -> {adVotes, nonAdVotes, blocked, src, pausedSince} (Map, not WeakMap, so the sampler can prune stale-blocked overlays)
   const iframeState = new WeakMap();       // large cross-origin iframe -> {fp, adVotes, nonAdVotes, blocked, classified}
   let iframeTick = 0;                      // sampler tick counter (blocked frames re-verify every 2nd tick)
   // The content script runs in every frame (manifest all_frames). The TOP frame
@@ -174,6 +174,16 @@
     }
     setInterval(sampleVideos, VIDEO_SAMPLE_MS);  // runs in every frame
     requestAnimationFrame(trackOverlays);
+
+    // Only the visible (active) tab scans. The scan + samplers all self-skip on
+    // document.hidden, and the background refuses captures/classifies from a
+    // non-active tab — so a backgrounded tab never fights the single shared
+    // engine or the capture rate limiter. On returning to the foreground, kick
+    // a fresh scan so the newly-active tab catches up promptly.
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) clearTimeout(scanTimer);
+      else if (enabled && IS_TOP) scheduleScan(300);
+    });
   }
 
   function scheduleScan(delay) {
@@ -642,11 +652,41 @@
     }
   }
 
+  function clearVideo(v) {
+    overlays.get(v)?.remove();
+    overlays.delete(v);
+    const st = videoState.get(v);
+    if (st) { st.blocked = false; st.adVotes = 0; st.nonAdVotes = 0; st.pausedSince = 0; }
+    reportBlocked();
+  }
+
   async function sampleVideos() {
     if (!enabled || document.hidden || !blockVideo) return; // video path
+    // Release stale video overlays BEFORE sampling. The old code filtered out
+    // paused videos entirely, so a blocked pre-roll that PAUSED when it finished
+    // never got a non-ad vote and stayed covered forever — the "blocks the ad
+    // then never unblocks" bug. Clear a covered video the moment it ends, has
+    // its source swapped to program content, leaves the DOM, scrolls off, or
+    // sits paused-under-a-card for >3s (ad ended or the user paused).
+    for (const [v, st] of videoState) {
+      if (!v.isConnected) { overlays.get(v)?.remove(); overlays.delete(v); videoState.delete(v); reportBlocked(); continue; }
+      if (!st.blocked) continue;
+      const r = v.getBoundingClientRect();
+      const cur = v.currentSrc || v.src || "";
+      if (v.ended || !isVisible(v, r) || (st.src && cur && cur !== st.src)) { clearVideo(v); continue; }
+      if (v.paused) {
+        st.pausedSince = st.pausedSince || Date.now();
+        if (Date.now() - st.pausedSince > 3000) clearVideo(v);
+      } else {
+        st.pausedSince = 0;
+      }
+    }
     const videos = [...document.querySelectorAll("video")].filter((v) => {
       const r = v.getBoundingClientRect();
-      return !allowed.has(v) && !v.paused && isVisible(v, r);
+      if (allowed.has(v) || !isVisible(v, r)) return false;
+      // Sample playing videos AND keep re-verifying a blocked video even while
+      // paused, so a finished / mislabeled ad clears on non-ad votes.
+      return !v.paused || !!videoState.get(v)?.blocked;
     });
     if (!videos.length) return;
 
@@ -693,12 +733,15 @@
       if (r.is_ad) { st.adVotes++; st.nonAdVotes = 0; } else { st.nonAdVotes++; st.adVotes = 0; }
       if (!st.blocked && st.adVotes >= VIDEO_HYSTERESIS) {
         st.blocked = true;
+        st.src = v.currentSrc || v.src || "";   // ad's source; a swap to content clears the card
+        st.pausedSince = 0;
         block(v, r.p_ad, "video");
+        // instant clear when THIS ad element ends/empties (faster than the tick)
+        const onEnd = () => { v.removeEventListener("ended", onEnd); v.removeEventListener("emptied", onEnd); clearVideo(v); };
+        v.addEventListener("ended", onEnd);
+        v.addEventListener("emptied", onEnd);
       } else if (st.blocked && st.nonAdVotes >= VIDEO_HYSTERESIS) {
-        st.blocked = false;
-        overlays.get(v)?.remove();
-        overlays.delete(v);
-        reportBlocked();
+        clearVideo(v);
       }
       videoState.set(v, st);
     });

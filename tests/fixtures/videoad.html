@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Minus fixture — video ad → content</title>
+<style>body{font-family:sans-serif;max-width:1100px;margin:24px auto}#v{width:640px;height:360px;background:#000;border:0}</style>
+</head>
+<body>
+  <h1>Fixture: a &lt;video&gt; playing an ad, then content</h1>
+  <p>A canvas is streamed into the video element. The ad image plays first;
+     test hooks swap it to program content or end/pause the video.</p>
+  <video id="v" autoplay muted loop playsinline></video>
+  <script>
+    const cv = document.createElement("canvas");
+    cv.width = 640; cv.height = 360;
+    const ctx = cv.getContext("2d");
+    const imgs = {};
+    let mode = "ad";
+    function load(name, src) {
+      return new Promise((res) => { const i = new Image(); i.onload = () => { imgs[name] = i; res(); }; i.src = src; });
+    }
+    function paint() {
+      const im = imgs[mode];
+      if (im) ctx.drawImage(im, 0, 0, cv.width, cv.height);
+      requestAnimationFrame(paint);
+    }
+    (async () => {
+      await Promise.all([load("ad", "vad_ad.png"), load("content", "vad_content.png")]);
+      paint();
+      const stream = cv.captureStream(15);
+      const v = document.getElementById("v");
+      v.srcObject = stream;
+      await v.play().catch(() => {});
+      // test hooks (driven from Playwright via page.evaluate)
+      window.__vad = {
+        toContent: () => { mode = "content"; },
+        toAd: () => { mode = "ad"; },
+        end: () => { const v = document.getElementById("v"); v.pause(); v.dispatchEvent(new Event("ended")); },
+        pause: () => { document.getElementById("v").pause(); },
+        mode: () => mode,
+      };
+      window.__vadReady = true;
+    })();
+  </script>
+</body>
+</html>
