@@ -327,28 +327,46 @@ function resetEngine() {
   disposeOld(old);
 }
 
+// Concurrent classify batches (content.js runs in all_frames) can each hit a
+// fatal GPU error on the SAME shared engine. Without a guard, batch B would
+// resetEngine a second time and dispose the fresh engine batch A just rebuilt.
+// Only the batch whose dead engine is still the live one triggers the reset;
+// the others simply adopt whatever engine is current now.
+async function rebuildEngine(deadEngine, engineKind) {
+  const cur = await Promise.resolve(enginePromise).catch(() => null);
+  if (cur && cur !== deadEngine) return cur;   // already rebuilt by another batch
+  if (cur === deadEngine) resetEngine();
+  return getEngine(engineKind);
+}
+
 async function getEngine(engineKind = "lfm") {
   const catalog = await getCatalog();
   const entry = resolveModel(catalog, engineKind);
   if (enginePromise && loadedEngineKey !== entry.key) {
     // Engine switch: dispose the previous device before creating the new one.
-    const old = enginePromise;
+    disposeOld(enginePromise);
     enginePromise = null;
     engineInfo = { state: "cold" };
-    disposeOld(old);
   }
-  // Any pending disposal (from a switch or a device-loss reset) must complete
-  // before we spin up a fresh device.
-  if (disposalDone) { const d = disposalDone; disposalDone = null; await d; }
   if (!enginePromise) {
     loadedEngineKey = entry.key;
-    enginePromise = (async () => Promise.race([
-      (entry.kind === "siglip2" ? loadSiglip2Engine(entry) : loadEngine(entry)),
-      // A WebGPU load that never resolves (Tegra device wedge after a reset)
-      // would leave the engine stuck "loading" forever, silently blocking
-      // nothing. Time it out so the next classify/status triggers a clean retry.
-      new Promise((_, rej) => setTimeout(() => rej(new Error("engine load timeout")), 90000)),
-    ]))()
+    // Assign enginePromise SYNCHRONOUSLY (before any await) so a concurrent
+    // getEngine sees it and shares this one build — single-flight. The pending
+    // disposal barrier is folded INTO the builder (not awaited out here where a
+    // racing caller could null it and skip the wait), so the new WebGPU device
+    // is created only after the old one has fully torn down.
+    const pending = disposalDone;
+    disposalDone = null;
+    enginePromise = (async () => {
+      if (pending) await pending;
+      return Promise.race([
+        (entry.kind === "siglip2" ? loadSiglip2Engine(entry) : loadEngine(entry)),
+        // A WebGPU load that never resolves (Tegra device wedge after a reset)
+        // would leave the engine stuck "loading" forever, silently blocking
+        // nothing. Time it out so the next classify/status triggers a clean retry.
+        new Promise((_, rej) => setTimeout(() => rej(new Error("engine load timeout")), 90000)),
+      ]);
+    })()
       .catch((e) => {
         enginePromise = null;
         loadedEngineKey = null;
@@ -432,8 +450,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             if (fatal && !rebuilt) {
               rebuilt = true;
               console.warn("[minus] GPU device lost — rebuilding engine:", String(e).slice(0, 120));
-              resetEngine();
-              try { engine = await getEngine(msg.engineKind); }
+              try { engine = await rebuildEngine(engine, msg.engineKind); }
               catch (er) { results.push({ p_ad: 0, ms: 0, error: String(er) }); continue; }
             } else {
               console.warn("[minus] classify error, retrying once:", String(e).slice(0, 120));

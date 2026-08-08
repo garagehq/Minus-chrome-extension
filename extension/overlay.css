@@ -85,3 +85,9 @@
    events, so clicks fall through to the layer underneath. Restored the moment
    the covering layer goes away (see updateOcclusion in content.js). */
 [data-minus-overlay].minus-occluded { visibility: hidden; }
+
+/* Keyboard/touch: the reveal ✕ is hover-only by default, which is unreachable
+   without a mouse. Show it whenever the card or the button itself is focused. */
+[data-minus-overlay]:focus-within .minus-x,
+[data-minus-overlay] .minus-x:focus-visible { opacity: 1; }
+[data-minus-overlay] .minus-x:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }

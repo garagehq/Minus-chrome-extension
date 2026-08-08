@@ -201,6 +201,18 @@ function onInstalled(details) {
 
 chrome.runtime.onInstalled.addListener(onInstalled);
 chrome.runtime.onStartup?.addListener(initActionStyle);
+
+// Keyboard shortcut (user-bindable at chrome://extensions/shortcuts) — a quick
+// global on/off, the one ad-blocker convenience we were missing. Flipping the
+// stored flag makes content.js tear down/restore overlays and the background
+// warm/unload the model, all via the existing storage.onChanged handlers.
+chrome.commands?.onCommand?.addListener(async (cmd) => {
+  if (cmd !== "toggle-blocking") return;
+  try {
+    const { enabled = true } = await chrome.storage.local.get({ enabled: true });
+    await chrome.storage.local.set({ enabled: !enabled });
+  } catch {}
+});
 initActionStyle();
 
 // ---------------------------------------------------------------- badge / icon
@@ -216,10 +228,39 @@ const blockedByTab = new Map();
 function setFrameCount(tabId, frameId, count) {
   let frames = blockedByTab.get(tabId);
   if (!frames) { frames = new Map(); blockedByTab.set(tabId, frames); }
+  const prev = frames.get(frameId) || 0;
+  if (count > prev) bumpLifetime(count - prev);   // newly-covered ads → lifetime tally
   if (count > 0) frames.set(frameId, count); else frames.delete(frameId);
   let total = 0;
   for (const c of frames.values()) total += c;
   return total;
+}
+
+// Lifetime "ads blocked" counter (the "is this working / worth it" signal every
+// blocker shows). Batched so we don't write storage on every single cover.
+let lifetimePending = 0, lifetimeFlush = null;
+function bumpLifetime(n) {
+  if (n <= 0) return;
+  lifetimePending += n;
+  if (lifetimeFlush) return;
+  lifetimeFlush = setTimeout(async () => {
+    const add = lifetimePending; lifetimePending = 0; lifetimeFlush = null;
+    try {
+      const { lifetimeBlocked = 0 } = await chrome.storage.local.get({ lifetimeBlocked: 0 });
+      await chrome.storage.local.set({ lifetimeBlocked: lifetimeBlocked + add });
+    } catch {}
+  }, 5000);
+}
+
+// Allowlist match: www-insensitive AND subdomain-aware, so disabling "example.com"
+// also covers "www.example.com" / "m.example.com" (exact-hostname-only surprised users).
+const normHost = (h) => String(h || "").toLowerCase().replace(/^www\./, "");
+function isDisabled(host, disabledSites) {
+  const h = normHost(host);
+  return (disabledSites || []).some((raw) => {
+    const d = normHost(raw);
+    return d && (h === d || h.endsWith("." + d));
+  });
 }
 
 async function paintAction(tabId, count) {
@@ -289,7 +330,15 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 function askOffscreen(msg) {
   return new Promise((resolve, reject) => {
+    // A WebGPU classify can HANG (not throw) on a wedged device — the offscreen
+    // never calls sendResponse, so without a timeout this promise (and the
+    // content-side classify it backs) would never settle. Bound it; the caller
+    // treats a timeout as an engine error and retries on the next scan.
+    let done = false;
+    const t = setTimeout(() => { if (!done) { done = true; reject(new Error("offscreen timeout")); } }, 30000);
     chrome.runtime.sendMessage({ ...msg, target: "minus-offscreen" }, (resp) => {
+      if (done) return;
+      done = true; clearTimeout(t);
       if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
       else resolve(resp);
     });
@@ -395,7 +444,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           ok: true,
           settings: {
             ...settings,
-            enabled: settings.enabled && !settings.disabledSites.includes(host),
+            enabled: settings.enabled && !isDisabled(host, settings.disabledSites),
             // per-engine decision thresholds (models/index.json `thresholds`);
             // null -> content.js keeps its built-in defaults.
             engineThresholds: await engineThresholds(settings.engineKind),

@@ -32,6 +32,7 @@
     .stat .num { font-family: "VT323", monospace; font-size: 40px; line-height: 1; color: var(--blue);
       text-shadow: 0 0 12px rgba(59,130,246,0.6); }
     .stat .statlabel { font-size: 16px; color: var(--muted); letter-spacing: 0.04em; max-width: 150px; }
+    .lifetime { text-align: center; font-size: 14px; color: var(--muted); margin: -2px 0 10px; letter-spacing: 0.03em; }
 
     /* Controls: generous vertical rhythm */
     .row { display: flex; align-items: center; gap: 12px; padding: 9px 0; }
@@ -79,6 +80,7 @@
     <span class="num" id="blockedCount">0</span>
     <span class="statlabel">ads blocked on this page</span>
   </div>
+  <div class="lifetime" id="lifetime"></div>
 
   <div class="row">
     <label class="toggle-switch"><input type="checkbox" id="enabled"><span class="toggle-slider"></span></label>

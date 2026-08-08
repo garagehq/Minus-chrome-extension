@@ -79,6 +79,37 @@
   let scanTimer = null;
   let scanning = false;
   let lastReported = -1;
+  let started = false;
+  let ctxDead = false;                      // extension context invalidated (SW update/reload)
+  const timers = [];                        // setInterval ids, cleared on shutdown
+
+  // chrome.runtime.sendMessage THROWS synchronously once the extension context
+  // is invalidated (the extension was updated/reloaded while this page lived).
+  // Route every message through here so that (a) we never emit unhandled
+  // rejections, and (b) the first such failure shuts the content script down
+  // instead of spamming failed capture/classify attempts every 2.5s forever.
+  function sendMsg(msg) {
+    return new Promise((resolve) => {
+      if (ctxDead) { resolve(null); return; }
+      try {
+        chrome.runtime.sendMessage(msg, (resp) => {
+          void chrome.runtime.lastError;    // consume "context invalidated"/"no receiver"
+          resolve(resp ?? null);
+        });
+      } catch (e) {
+        if (/context invalidated|Extension context/i.test(String(e))) shutdown();
+        resolve(null);
+      }
+    });
+  }
+  function shutdown() {
+    if (ctxDead) return;
+    ctxDead = true;
+    clearTimeout(scanTimer); scanTimer = null;
+    for (const id of timers) clearInterval(id);
+    for (const [, div] of overlays) div.remove();
+    overlays.clear();
+  }
 
   // Tell the background the live count of ads currently covered on this page so
   // it can drive the toolbar badge (and flip the icon blue->red). Only fires on
@@ -87,7 +118,7 @@
     const n = overlays.size;
     if (n === lastReported) return;
     lastReported = n;
-    try { chrome.runtime.sendMessage({ type: "minus:blocked", count: n }); } catch {}
+    sendMsg({ type: "minus:blocked", count: n });
   }
 
   // Sub-frames only ever run the video path, so skip frames too small to host a
@@ -95,7 +126,7 @@
   // and chrome iframes that all_frames would otherwise inject into.
   if (!IS_TOP && (innerWidth < 160 || innerHeight < 120)) return;
 
-  chrome.runtime.sendMessage({ type: "minus:settings" }, (resp) => {
+  sendMsg({ type: "minus:settings" }).then((resp) => {
     if (resp?.ok) {
       enabled = resp.settings.enabled;
       collectOptIn = !!resp.settings.collectOptIn;
@@ -111,19 +142,44 @@
         if (typeof th.bare === "number" && th.bare > 0 && th.bare < 1) BARE_BLOCK_P = th.bare;
       }
     }
-    if (enabled) start();
+    start();  // set up the machinery once; every scan/sampler self-skips while !enabled
   });
 
-  // React live to popup toggle changes (no reload): update the flags, and clear
-  // any overlays whose type was just switched off. New scans respect the flags.
+  // Uncover everything and forget page state — used when blocking is turned off
+  // (globally or for this site) so the page visibly returns to normal at once.
+  function teardownOverlays() {
+    for (const [, div] of overlays) div.remove();
+    overlays.clear();
+    videoState.clear();
+    reportBlocked();
+  }
+
+  function applyEnabledState(next) {
+    next = !!next;
+    if (next === enabled) return;
+    enabled = next;
+    if (!enabled) { clearTimeout(scanTimer); scanTimer = null; teardownOverlays(); }
+    else if (IS_TOP && !document.hidden) scheduleScan(300);
+  }
+
+  // React live to popup/options changes (no reload).
   chrome.storage?.onChanged?.addListener((changes, area) => {
     if (area !== "local") return;
+    // Master enable / per-site allowlist changed → re-derive whether WE are on,
+    // since the background folds disabledSites+host into `settings.enabled`.
+    if ("enabled" in changes || "disabledSites" in changes) {
+      sendMsg({ type: "minus:settings" }).then((resp) => {
+        if (resp?.ok) applyEnabledState(resp.settings.enabled);
+      });
+    }
     if ("blockVideo" in changes) blockVideo = changes.blockVideo.newValue !== false;
     if ("blockDisplay" in changes) blockDisplay = changes.blockDisplay.newValue !== false;
     for (const [el, div] of overlays) {
       const kind = div.dataset.minusKind;
       if ((kind === "video" && !blockVideo) || (kind === "display" && !blockDisplay)) {
         div.remove(); overlays.delete(el);
+        // a re-enabled type must re-cover, so clear the sticky "blocked" state
+        if (kind === "video") videoState.delete(el);
       }
     }
     // Block-action appearance changed in the options page: re-render live
@@ -146,7 +202,7 @@
     if (!collectOptIn || !crop) return;
     const key = `${location.hostname}|${Date.now()}|${Math.random().toString(36).slice(2, 8)}`;
     sampleKeys.set(el, key);
-    chrome.runtime.sendMessage({
+    sendMsg({
       type: "minus:queue-sample",
       sample: {
         key,
@@ -162,18 +218,24 @@
   }
 
   function start() {
+    if (started) return;   // idempotent — set up observers/intervals/rAF exactly once
+    started = true;
     // Static DOM scan + large-iframe motion sampler are top-frame only (they
     // rely on the tab screenshot, whose coordinates are the top viewport's).
     if (IS_TOP) {
       scheduleScan(200);
+      // NOTE: no "style" in the filter. Pages that animate inline styles (tickers,
+      // progress bars, sticky-header transforms) mutate every frame; watching
+      // style would fire the observer nonstop. Combined with the coalescing
+      // scheduleScan below, a scan is guaranteed to run instead of being reset
+      // forever (the "ads never get scanned on animated pages" bug).
       new MutationObserver(() => scheduleScan(SCAN_DEBOUNCE_MS))
-        .observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["src", "class", "id", "style"] });
+        .observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["src", "class", "id"] });
       addEventListener("scroll", () => scheduleScan(SCAN_DEBOUNCE_MS), { passive: true });
       addEventListener("resize", () => scheduleScan(SCAN_DEBOUNCE_MS), { passive: true });
-      setInterval(sampleIframes, VIDEO_SAMPLE_MS);
+      timers.push(setInterval(sampleIframes, VIDEO_SAMPLE_MS));
     }
-    setInterval(sampleVideos, VIDEO_SAMPLE_MS);  // runs in every frame
-    requestAnimationFrame(trackOverlays);
+    timers.push(setInterval(sampleVideos, VIDEO_SAMPLE_MS));  // runs in every frame
 
     // Only the visible (active) tab scans. The scan + samplers all self-skip on
     // document.hidden, and the background refuses captures/classifies from a
@@ -181,14 +243,18 @@
     // engine or the capture rate limiter. On returning to the foreground, kick
     // a fresh scan so the newly-active tab catches up promptly.
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) clearTimeout(scanTimer);
+      if (document.hidden) { clearTimeout(scanTimer); scanTimer = null; }
       else if (enabled && IS_TOP) scheduleScan(300);
     });
   }
 
+  // Coalescing scheduler: once a scan is queued it is NEVER pushed back. A pure
+  // trailing debounce (clearTimeout + reset) meant a page mutating on a timer
+  // reset the countdown every tick and scan() never ran; coalescing guarantees
+  // the queued scan fires, then the next mutation queues a fresh one.
   function scheduleScan(delay) {
-    clearTimeout(scanTimer);
-    scanTimer = setTimeout(scan, delay);
+    if (scanTimer) return;
+    scanTimer = setTimeout(() => { scanTimer = null; scan(); }, delay);
   }
 
   // ---------------------------------------------------------------- candidates
@@ -201,9 +267,28 @@
     return style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0.1;
   }
 
+  // Short, stable-ish DOM path (tag + sibling index, up to 4 levels) — used to
+  // disambiguate src-less candidates that would otherwise share a signature.
+  function domKey(el) {
+    let k = "", node = el, depth = 0;
+    while (node && node.nodeType === 1 && depth < 4) {
+      const p = node.parentNode;
+      const idx = p && p.children ? Array.prototype.indexOf.call(p.children, node) : 0;
+      k = `${node.tagName}:${idx}>${k}`;
+      node = p; depth++;
+    }
+    return k;
+  }
   function signature(el, rect) {
     const src = el.currentSrc || el.src || el.dataset?.src || "";
-    return `${el.tagName}|${src}|${Math.round(rect.width)}x${Math.round(rect.height)}`;
+    const base = `${el.tagName}|${src}|${Math.round(rect.width)}x${Math.round(rect.height)}`;
+    if (src) return base;
+    // src-less ad slots (div/section/a) all look like "DIV||300x250" — two
+    // distinct 300×250 slots would share one cached verdict and a real ad could
+    // be silently skipped (or a non-ad auto-blocked). Disambiguate by id/class +
+    // DOM position.
+    const cls = typeof el.className === "string" ? el.className.slice(0, 40) : "";
+    return `${base}|${el.id || ""}|${cls}|${domKey(el)}`;
   }
 
   // True only for shapes a real ad slot can plausibly be. Rejects content
@@ -302,7 +387,8 @@
 
   // ---------------------------------------------------------------- classify
   async function scan() {
-    if (!enabled || scanning || document.hidden || !blockDisplay) return; // display path
+    if (!enabled || document.hidden || !blockDisplay) return; // display path
+    if (scanning) { scheduleScan(SCAN_DEBOUNCE_MS); return; } // busy: retry after the in-flight scan
     scanning = true;
     try {
       const els = candidates().filter((el) => {
@@ -376,12 +462,11 @@
       return rects.some((q) => r.left < q.right && r.right > q.left && r.top < q.bottom && r.bottom > q.top);
     });
     if (divs.length) {
-      await new Promise((r) => chrome.runtime.sendMessage({ type: "minus:capture-wait" }, r)); // pre-arm rate limiter
+      await sendMsg({ type: "minus:capture-wait" }); // pre-arm rate limiter
       divs.forEach((d) => (d.style.visibility = "hidden"));
       await new Promise((r) => setTimeout(r, 50)); // let the compositor repaint
     }
-    const dataUrl = await new Promise((resolve) =>
-      chrome.runtime.sendMessage({ type: "minus:capture" }, (resp) => resolve(resp?.ok ? resp.dataUrl : null)));
+    const dataUrl = await sendMsg({ type: "minus:capture" }).then((resp) => (resp?.ok ? resp.dataUrl : null));
     divs.forEach((d) => (d.style.visibility = ""));
     if (!dataUrl) return null;
     return await new Promise((resolve) => {
@@ -392,21 +477,23 @@
     });
   }
 
-  function capture() {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: "minus:capture" }, async (resp) => {
-        if (!resp?.ok) return resolve(null);
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = () => resolve(null);
-        img.src = resp.dataUrl;
-      });
+  async function capture() {
+    const resp = await sendMsg({ type: "minus:capture" });
+    if (!resp?.ok) return null;
+    return await new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = resp.dataUrl;
     });
   }
 
   function cropFromShot(img, rect) {
-    // screenshot is in physical pixels; rect is in CSS pixels
-    const scale = img.width / innerWidth;
+    // screenshot is in physical pixels; rect is in CSS pixels. Use clientWidth
+    // (the rendered content width) not innerWidth (which includes the scrollbar
+    // gutter) so crops don't skew a few px on pages with a classic scrollbar.
+    const vw = document.documentElement.clientWidth || innerWidth;
+    const scale = img.width / vw;
     const sx = Math.max(0, rect.left) * scale;
     const sy = Math.max(0, rect.top) * scale;
     const sw = (Math.min(rect.right, innerWidth) - Math.max(0, rect.left)) * scale;
@@ -443,9 +530,7 @@
 
   function classifyBatch(images) {
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: "minus:classify", images }, (resp) => {
-        resolve(resp?.ok ? resp.results : null);
-      });
+      sendMsg({ type: "minus:classify", images }).then((resp) => resolve(resp?.ok ? resp.results : null));
     });
   }
 
@@ -455,27 +540,33 @@
   // Card body per the configured block action (options page). The X button is
   // (re)wired by renderCard so a live style switch keeps reveal working.
   function renderCard(el, div, pAd) {
-    const pTag = pAd != null && showConfidence
-      ? `<div class="minus-p">ad ${(pAd * 100).toFixed(0)}%</div>` : "";
+    let w, en, ex;
     if (blockAction === "minimal") {
-      div.innerHTML = `
-      <button class="minus-x" title="Show this ad">&times;</button>
-      <div class="minus-brand">minus</div>
-      <div class="minus-es">ad blocked</div>
-      <div class="minus-ex">This ad has been blocked by minus.</div>
-      ${pTag}`;
+      w = "ad blocked"; en = ""; ex = "This ad has been blocked by minus.";
     } else {
       const deck = activeDeck
         || (typeof MINUS_DECKS !== "undefined" && MINUS_DECKS[blockLang]) || MINUS_SPANISH;
       const card = deck[Math.floor(Math.random() * deck.length)];
-      div.innerHTML = `
-      <button class="minus-x" title="Show this ad">&times;</button>
-      <div class="minus-brand">minus</div>
-      <div class="minus-es">${card.w ?? card.es}</div>
-      <div class="minus-en">${card.en}</div>
-      <div class="minus-ex">${card.ex}</div>
-      ${pTag}`;
+      w = card.w ?? card.es; en = card.en || ""; ex = card.ex || "";
     }
+    // Skeleton via innerHTML (static, first-party), dynamic strings via
+    // textContent (never HTML — safe even if a future deck string contains
+    // markup). The flashcard text is aria-hidden so a screen reader doesn't read
+    // random foreign vocabulary injected over every blocked ad; only the labeled
+    // reveal button is exposed.
+    div.innerHTML = `
+      <button class="minus-x" aria-label="Reveal the ad blocked by Minus" title="Show this ad">&times;</button>
+      <div class="minus-brand" aria-hidden="true">minus</div>
+      <div class="minus-es" aria-hidden="true"></div>
+      <div class="minus-en" aria-hidden="true"></div>
+      <div class="minus-ex" aria-hidden="true"></div>
+      <div class="minus-p" aria-hidden="true"></div>`;
+    div.querySelector(".minus-es").textContent = w;
+    div.querySelector(".minus-en").textContent = en;
+    div.querySelector(".minus-ex").textContent = ex;
+    const pEl = div.querySelector(".minus-p");
+    if (pAd != null && showConfidence) pEl.textContent = `ad ${(pAd * 100).toFixed(0)}%`;
+    else pEl.remove();
     div.querySelector(".minus-x").addEventListener("click", (e) => {
       e.stopPropagation();
       allowed.add(el);
@@ -484,7 +575,7 @@
       reportBlocked();
       // user said "show it" -> retract any queued contribution for this element
       const key = sampleKeys.get(el);
-      if (key) chrome.runtime.sendMessage({ type: "minus:retract-sample", key });
+      if (key) sendMsg({ type: "minus:retract-sample", key });
     });
   }
 
@@ -492,12 +583,15 @@
     if (overlays.has(el) || allowed.has(el)) return;
     const div = document.createElement("div");
     div.setAttribute("data-minus-overlay", "");
+    div.setAttribute("role", "group");
+    div.setAttribute("aria-label", "Advertisement blocked by Minus");
     div.dataset.minusKind = kind;
     if (pAd != null) div.dataset.minusP = String(pAd);
     renderCard(el, div, pAd);
     document.documentElement.appendChild(div);
     overlays.set(el, div);
     positionOverlay(el, div);
+    ensureTracking();
     reportBlocked();
   }
 
@@ -516,7 +610,18 @@
     div.classList.toggle("minus-compact", rect.height < 140 || rect.width < 220);
   }
 
+  // The rAF loop only runs while there ARE overlays to track. An always-on
+  // 60fps loop is pure busywork on the vast majority of pages that have no ads
+  // covered; block() restarts it via ensureTracking() when the first overlay
+  // appears, and it self-suspends once the last overlay is gone.
+  let tracking = false;
+  function ensureTracking() {
+    if (tracking || ctxDead) return;
+    tracking = true;
+    requestAnimationFrame(trackOverlays);
+  }
   function trackOverlays() {
+    if (overlays.size === 0 || ctxDead) { tracking = false; return; }
     const now = performance.now();
     const checkOcclusion = now - lastOcclusionCheck >= OCCLUSION_MS;
     if (checkOcclusion) lastOcclusionCheck = now;

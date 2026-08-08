@@ -25,8 +25,9 @@ for (const s of ["classify error, retrying once", "no available backend found", 
   ok(`does NOT match benign: ${s.slice(0, 40)}`, !re.test(s));
 
 // wiring: the classify handler must reset+rebuild on a fatal error, once per batch
-ok("classify handler calls resetEngine() on fatal error", /if \(fatal && !rebuilt\)[\s\S]{0,300}resetEngine\(\)/.test(src));
-ok("rebuilds via getEngine after reset", /resetEngine\(\);[\s\S]{0,120}getEngine\(msg\.engineKind\)/.test(src));
+ok("classify handler rebuilds engine on fatal error", /if \(fatal && !rebuilt\)[\s\S]{0,300}rebuildEngine\(engine, msg\.engineKind\)/.test(src));
+ok("rebuildEngine single-flights reset + getEngine (guards concurrent batches)",
+   /async function rebuildEngine[\s\S]{0,400}resetEngine\(\)[\s\S]{0,80}getEngine\(engineKind\)/.test(src));
 ok("resetEngine clears enginePromise + loadedEngineKey", /function resetEngine\(\)[\s\S]{0,220}enginePromise = null[\s\S]{0,120}loadedEngineKey = null/.test(src));
 ok("engineInfo reset to cold so status reflects recovery", /function resetEngine\(\)[\s\S]{0,260}engineInfo = \{ state: "cold" \}/.test(src));
 

@@ -163,6 +163,28 @@ async function videoUnblockCase(name, trigger) {
 await videoUnblockCase("ended", (pg) => pg.evaluate(() => window.__vad.end()));
 await videoUnblockCase("swap-to-content", (pg) => pg.evaluate(() => window.__vad.toContent()));
 
+// ================= PHASE 2.5 — disable actually tears down =================
+console.log("\n=== Phase 2.5: turning blocking OFF removes overlays live ===");
+{
+  const pg = await ctx.newPage();
+  await pg.goto("https://www.forbes.com/", { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+  await pg.bringToFront();
+  let covered = false;
+  for (let i = 0; i < 18; i++) { if ((await overlayCount(pg)) > 0) { covered = true; break; } await pg.waitForTimeout(2500); }
+  ok("[disable] an ad got covered first", covered);
+  // flip the master switch off via storage (what the popup does)
+  await ctx.serviceWorkers()[0].evaluate(() => chrome.storage.local.set({ enabled: false }));
+  let cleared = false;
+  for (let i = 0; i < 8; i++) { if ((await overlayCount(pg)) === 0) { cleared = true; break; } await pg.waitForTimeout(1000); }
+  ok("[disable] all overlays removed when blocking turned OFF", cleared, "overlays remained after disable");
+  // re-enable → scanning resumes and re-covers
+  await ctx.serviceWorkers()[0].evaluate(() => chrome.storage.local.set({ enabled: true }));
+  let recovered = false;
+  for (let i = 0; i < 16; i++) { if ((await overlayCount(pg)) > 0) { recovered = true; break; } await pg.waitForTimeout(2500); }
+  ok("[disable] re-enabling resumes scanning and re-covers", recovered, "no overlay after re-enable");
+  await pg.close().catch(() => {});
+}
+
 // ================= PHASE 3 — 100+ real-site rotation =================
 console.log(`\n=== Phase 3: ${N_SITES}-site rotation (2 idle bg tabs held open) ===`);
 const idleBg = [];

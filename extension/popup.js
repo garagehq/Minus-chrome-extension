@@ -21,6 +21,10 @@ async function refreshCount() {
   if (currentTabId == null) return;
   const r = await ask({ type: "minus:blocked-count", tabId: currentTabId });
   document.getElementById("blockedCount").textContent = String(r?.count ?? 0);
+  try {
+    const { lifetimeBlocked = 0 } = await chrome.storage.local.get({ lifetimeBlocked: 0 });
+    document.getElementById("lifetime").textContent = lifetimeBlocked > 0 ? `${lifetimeBlocked.toLocaleString()} blocked all-time` : "";
+  } catch {}
 }
 
 async function refreshStatus() {

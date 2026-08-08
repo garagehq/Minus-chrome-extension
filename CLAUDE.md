@@ -82,6 +82,33 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
   also fixes the mid-run engine-switch wedge (popup engine dropdown). Do NOT add
   an idle-unload timer — it churns reset→reload and reintroduces the wedge on
   Tegra (tried in Iter 28, reverted).
+- **Concurrency around engine reset/reload is single-flighted.** `getEngine`
+  assigns `enginePromise` synchronously (before any await) so racing callers
+  share one build, and it folds the disposal-await INTO that builder rather than
+  awaiting a `disposalDone` barrier out in the open (which a racing caller could
+  null and skip). Concurrent classify batches (content runs in `all_frames`) go
+  through `rebuildEngine(deadEngine, kind)` which only resets if the dead engine
+  is still live — otherwise it adopts the freshly-rebuilt one, so batch B never
+  disposes the engine batch A just built. `askOffscreen` is timeout-bounded (a
+  WebGPU classify can hang without throwing, which would otherwise never settle).
+- **Turning blocking OFF must actually tear down.** content.js's
+  `storage.onChanged` handles `enabled`/`disabledSites` (not just the ad-type
+  toggles): it re-derives whether this tab is on via `minus:settings` and, when
+  off, removes every overlay + stops scanning; back on, it re-scans. `start()` is
+  idempotent and always runs (gated on `enabled`) so re-enabling works without a
+  reload. The allowlist match (`isDisabled`) is www-insensitive + subdomain-aware.
+- **content.js self-suspends its cost.** The overlay-tracking rAF loop only runs
+  while `overlays.size > 0` (`ensureTracking()` from `block()`), not 60fps
+  forever. The scan scheduler COALESCES (a queued scan is never postponed) and
+  the MutationObserver does not watch `style` — otherwise a page animating inline
+  styles resets the debounce every frame and ads never get scanned. All
+  `chrome.runtime.sendMessage` calls route through `sendMsg`, which swallows the
+  synchronous throw on context invalidation (extension update/reload) and shuts
+  the content script down instead of spamming failed captures every 2.5 s.
+- **Overlays are accessibility-clean.** The flashcard text is `aria-hidden` (a
+  screen reader shouldn't read random foreign vocab over every ad); the ✕ reveal
+  button carries an `aria-label` and is shown on keyboard focus (`:focus-within`/
+  `:focus-visible`), not hover-only; deck strings are set via `textContent`.
 - **Playwright evaluates on MV3 contexts HANG, not reject.** Chrome idle-kills
   the extension SW; an evaluate on a stale handle blocks forever, and a wedged
   renderer does the same for page/frame evaluates. Every SW poll must re-acquire
