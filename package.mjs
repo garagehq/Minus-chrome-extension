@@ -32,6 +32,7 @@ const EXCLUDE = [
   "models/lfm-iter25*",
   "models/lfm-iter26*",
   "models/lfm-iter27/*",
+  "models/lfm-iter27b*",
   "models/siglip2*",
   "*/.DS_Store",
   ".DS_Store",
