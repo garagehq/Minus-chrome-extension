@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Minus — Review</title>
+  <style>
+    @font-face { font-family: "VT323"; src: url("VT323.ttf") format("truetype"); font-display: block; }
+    :root { --blue: #3b82f6; --ink: #cfe6ff; --panel: #0e1621; --line: #24425f; --muted: #6f8bab;
+      --green: #6fd39a; --amber: #f0b866; --red: #e06f7f; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; background: #070b10; color: var(--ink);
+      font-family: "VT323", ui-monospace, monospace; font-size: 20px;
+      display: flex; flex-direction: column; align-items: center;
+      padding: 28px 16px 48px; position: relative; overflow-x: hidden;
+    }
+    body::after { content: ""; position: fixed; inset: 0; pointer-events: none;
+      background: repeating-linear-gradient(0deg, rgba(0,0,0,0.14) 0 1px, transparent 1px 3px); mix-blend-mode: multiply; }
+    .wrap { width: 100%; max-width: 620px; }
+    .brand { text-align: center; margin: 0 0 18px; }
+    .brand .word { font-size: 52px; line-height: 1; color: var(--blue); letter-spacing: 0.08em;
+      text-shadow: 0 0 14px rgba(59,130,246,0.55); }
+    .brand .sub { font-size: 18px; color: var(--muted); letter-spacing: 0.14em; text-transform: uppercase; }
+
+    .stats { display: flex; gap: 8px; margin-bottom: 16px; }
+    .stat { flex: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+      padding: 10px 6px; text-align: center; }
+    .stat .n { font-size: 30px; line-height: 1; color: var(--blue); text-shadow: 0 0 10px rgba(59,130,246,0.5); }
+    .stat .l { font-size: 14px; color: var(--muted); letter-spacing: 0.05em; text-transform: uppercase; margin-top: 4px; }
+    .stat.learned .n { color: var(--green); text-shadow: 0 0 10px rgba(111,211,154,0.5); }
+    .stat.due .n { color: var(--amber); text-shadow: 0 0 10px rgba(240,184,102,0.5); }
+
+    .bar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; font-size: 17px; color: var(--muted); }
+    .bar select { background: var(--panel); border: 1px solid var(--line); color: var(--ink);
+      font-family: "VT323", monospace; font-size: 17px; padding: 5px 8px; border-radius: 3px; cursor: pointer; }
+    .bar .pill { margin-left: auto; }
+
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+      min-height: 240px; padding: 30px 24px; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; text-align: center; box-shadow: 0 0 24px rgba(0,0,0,0.4) inset; }
+    .card .lang { font-size: 14px; color: var(--muted); letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 12px; }
+    .card .word { font-size: 46px; line-height: 1.1; color: #fff; text-shadow: 0 0 12px rgba(59,130,246,0.35); }
+    .card .en { font-size: 28px; color: var(--blue); margin-top: 16px; min-height: 30px; }
+    .card .ex { font-size: 22px; color: var(--ink); margin-top: 14px; opacity: 0.92; }
+    .hidden { display: none !important; }
+
+    .actions { margin-top: 18px; display: flex; gap: 10px; justify-content: center; }
+    button.act { flex: 1; max-width: 200px; background: var(--panel); border: 1px solid var(--line); color: var(--ink);
+      font-family: "VT323", monospace; font-size: 20px; padding: 12px 8px; border-radius: 4px; cursor: pointer;
+      letter-spacing: 0.03em; transition: 0.15s; }
+    button.act:hover { border-color: var(--blue); color: #fff; }
+    button.act .k { font-size: 13px; color: var(--muted); display: block; margin-top: 2px; }
+    button.again { border-color: rgba(224,111,127,0.5); }
+    button.again:hover { border-color: var(--red); }
+    button.good:hover { border-color: var(--green); }
+    button.easy:hover { border-color: var(--amber); }
+    #showBtn { width: 100%; max-width: none; }
+
+    .empty { text-align: center; color: var(--muted); font-size: 22px; line-height: 1.5; padding: 40px 10px; }
+    .empty .big { font-size: 30px; color: var(--ink); margin-bottom: 10px; }
+    .foot { margin-top: 26px; text-align: center; font-size: 15px; color: var(--muted); letter-spacing: 0.04em; }
+    .foot a { color: var(--muted); text-decoration: none; }
+    .foot a:hover { color: var(--blue); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand"><div class="word">Minus</div><div class="sub">flashcard review</div></div>
+
+    <div class="stats">
+      <div class="stat"><div class="n" id="sSeen">0</div><div class="l">seen</div></div>
+      <div class="stat"><div class="n" id="sLearning">0</div><div class="l">learning</div></div>
+      <div class="stat learned"><div class="n" id="sLearned">0</div><div class="l">learned</div></div>
+      <div class="stat due"><div class="n" id="sDue">0</div><div class="l">to review</div></div>
+    </div>
+
+    <div class="bar">
+      <label for="lang">Language</label>
+      <select id="lang"></select>
+      <span class="pill" id="progress"></span>
+    </div>
+
+    <div id="session">
+      <div class="card" id="card">
+        <div class="lang" id="cLang"></div>
+        <div class="word" id="cWord"></div>
+        <div class="en hidden" id="cEn"></div>
+        <div class="ex hidden" id="cEx"></div>
+      </div>
+      <div class="actions" id="showRow">
+        <button class="act" id="showBtn">Show answer <span class="k">space</span></button>
+      </div>
+      <div class="actions hidden" id="gradeRow">
+        <button class="act again" data-g="0">Again <span class="k">1</span></button>
+        <button class="act good" data-g="1">Good <span class="k">2</span></button>
+        <button class="act easy" data-g="2">Easy <span class="k">3</span></button>
+      </div>
+    </div>
+
+    <div id="done" class="empty hidden">
+      <div class="big" id="doneBig">All caught up ✓</div>
+      <div id="doneMsg">Words you see on blocked ads will show up here to review. Come back later!</div>
+    </div>
+
+    <div class="foot">
+      Words appear here as you browse — every ad Minus blocks teaches you one.
+      &nbsp;·&nbsp; <a id="optionsLink" href="#">options</a>
+    </div>
+  </div>
+  <script src="spanish.js"></script>
+  <script src="learn.js"></script>
+  <script src="review.js"></script>
+</body>
+</html>

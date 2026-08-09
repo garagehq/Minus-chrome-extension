@@ -32,7 +32,12 @@
     .stat .num { font-family: "VT323", monospace; font-size: 40px; line-height: 1; color: var(--blue);
       text-shadow: 0 0 12px rgba(59,130,246,0.6); }
     .stat .statlabel { font-size: 16px; color: var(--muted); letter-spacing: 0.04em; max-width: 150px; }
-    .lifetime { text-align: center; font-size: 14px; color: var(--muted); margin: -2px 0 10px; letter-spacing: 0.03em; }
+    .lifetime { text-align: center; font-size: 14px; color: var(--muted); margin: -2px 0 8px; letter-spacing: 0.03em; }
+    .reviewbtn { width: 100%; margin: 0 0 10px; background: var(--panel); border: 1px solid var(--line);
+      color: var(--ink); font-family: "VT323", monospace; font-size: 16px; padding: 8px 6px; border-radius: 3px;
+      cursor: pointer; letter-spacing: 0.03em; }
+    .reviewbtn:hover { border-color: var(--blue); color: #fff; }
+    .reviewbtn b { color: var(--amber); }
     .pause { display: flex; gap: 6px; padding: 6px 0 2px; align-items: center; }
     .pause #pausedMsg { font-size: 15px; color: #f0b866; flex: 1; }
     .pausebtn { flex: 1; background: var(--panel); border: 1px solid var(--line); color: var(--ink);
@@ -87,6 +92,7 @@
     <span class="statlabel">ads blocked on this page</span>
   </div>
   <div class="lifetime" id="lifetime"></div>
+  <button class="reviewbtn" id="reviewBtn">📚 Review flashcards</button>
 
   <div class="row">
     <label class="toggle-switch"><input type="checkbox" id="enabled"><span class="toggle-slider"></span></label>
@@ -145,6 +151,7 @@
     <a id="coffee" href="https://buymeacoffee.com/cyrilengmann" target="_blank" rel="noopener">☕ coffee</a>
     <a id="repo" href="https://github.com/garagehq/Minus-chrome-extension" target="_blank" rel="noopener">source ↗</a>
   </div>
+  <script src="learn.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

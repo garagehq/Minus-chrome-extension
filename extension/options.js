@@ -136,4 +136,24 @@ $("disabledSites").addEventListener("change", () => {
 // clicking the preview deals a new card
 $("preview").addEventListener("click", async () => renderPreview(await current()));
 
+// ---- Learning section: progress stats + open review + reset ----
+async function refreshLearnStats() {
+  try {
+    const store = await minusLearnLoad();
+    const s = minusLearnStats(store, Date.now(), "all");
+    $("lsSeen").textContent = s.seen;
+    $("lsLearning").textContent = s.learning;
+    $("lsLearned").textContent = s.learned;
+    $("lsDue").textContent = minusBuildQueue(store, Date.now(), "all").length;
+  } catch { /* storage unavailable */ }
+}
+$("openReview").addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL("review.html") }));
+$("resetLearn").addEventListener("click", async () => {
+  if (!confirm("Reset all flashcard progress? The words you've seen and their review schedule will be cleared.")) return;
+  await chrome.storage.local.set({ [MINUS_LEARN_KEY]: { v: 1, cards: {} } });
+  await refreshLearnStats();
+  savedFlash("learning progress reset");
+});
+refreshLearnStats();
+
 load();

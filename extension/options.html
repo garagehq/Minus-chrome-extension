@@ -34,6 +34,22 @@
       text-transform: uppercase; font-weight: normal; }
     .hint { color: var(--muted); font-size: 16px; margin: 0 0 14px; }
 
+    .learnstats { display: flex; gap: 10px; margin: 4px 0 16px; flex-wrap: wrap; }
+    .learnstats > span { flex: 1; min-width: 92px; background: var(--panel); border: 1px solid var(--line);
+      border-radius: 4px; padding: 10px 8px; text-align: center; font-size: 15px; color: var(--muted);
+      letter-spacing: 0.04em; text-transform: uppercase; }
+    .learnstats b { display: block; font-size: 28px; color: var(--blue); margin-bottom: 2px;
+      text-shadow: 0 0 10px rgba(59,130,246,0.5); }
+    .learnstats .learned b { color: #6fd39a; text-shadow: 0 0 10px rgba(111,211,154,0.5); }
+    .learnstats .due b { color: #f0b866; text-shadow: 0 0 10px rgba(240,184,102,0.5); }
+    .learnrow { display: flex; gap: 10px; }
+    .btn { background: var(--panel); border: 1px solid var(--line); color: var(--ink);
+      font-family: "VT323", monospace; font-size: 18px; padding: 10px 14px; border-radius: 3px;
+      cursor: pointer; letter-spacing: 0.03em; }
+    .btn:hover { border-color: var(--blue); color: #fff; }
+    .btn.primary { flex: 1; }
+    .btn.danger:hover { border-color: #e06f7f; color: #ffd9de; }
+
     .row { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
     .row .rl { font-size: 19px; cursor: pointer; }
     .sub { color: var(--muted); font-size: 15px; margin: -4px 0 4px 58px; }
@@ -130,6 +146,21 @@
     </section>
 
     <section>
+      <h2>Learning</h2>
+      <p class="hint">Every word Minus shows on a blocked ad becomes a flashcard. Review them with spaced repetition — words you recall are scheduled further out; words you miss come back sooner.</p>
+      <div class="learnstats">
+        <span><b id="lsSeen">0</b>seen</span>
+        <span><b id="lsLearning">0</b>learning</span>
+        <span class="learned"><b id="lsLearned">0</b>learned</span>
+        <span class="due"><b id="lsDue">0</b>to review</span>
+      </div>
+      <div class="learnrow">
+        <button type="button" class="btn primary" id="openReview">📚 Open review</button>
+        <button type="button" class="btn danger" id="resetLearn">Reset progress</button>
+      </div>
+    </section>
+
+    <section>
       <h2>Engine</h2>
       <p class="hint">The vision model that decides what's an ad. Each model ships its own decision thresholds.</p>
       <label class="field" for="engineKind">Model</label>
@@ -160,6 +191,7 @@
     </div>
   </div>
   <script src="spanish.js"></script>
+  <script src="learn.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

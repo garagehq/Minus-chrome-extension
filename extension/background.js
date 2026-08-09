@@ -409,6 +409,40 @@ async function engineThresholds(engineKind) {
   }
 }
 
+// ---- language-learning: record each flashcard word shown on a blocked ad ----
+// content.js fires minus:learn-seen from every frame; coalesce by key and flush
+// on a short timer so many overlays don't hammer storage. A new word enters as a
+// "new" SRS card (reps 0, due now); the Review page paces how many appear/day.
+const LEARN_KEY = "minusLearn";
+const learnPending = new Map();
+let learnFlushTimer = null;
+function recordSeen(card) {
+  if (!card || !card.l || !card.w) return;
+  learnPending.set(card.l + "::" + card.w, card);
+  if (!learnFlushTimer) learnFlushTimer = setTimeout(flushLearn, 4000);
+}
+async function flushLearn() {
+  learnFlushTimer = null;
+  if (!learnPending.size) return;
+  const batch = [...learnPending.values()];
+  learnPending.clear();
+  try {
+    const store = (await chrome.storage.local.get(LEARN_KEY))[LEARN_KEY] || { v: 1, cards: {} };
+    if (!store.cards) store.cards = {};
+    const now = Date.now();
+    for (const c of batch) {
+      const k = c.l + "::" + c.w;
+      const e = store.cards[k] || { l: c.l, w: c.w, en: c.en || "", ex: c.ex || "", seen: 0, reps: 0, ease: 2.5, ivl: 0, lapses: 0, due: now, first: now };
+      e.seen = (e.seen || 0) + 1;
+      e.last = now;
+      if (c.en) e.en = c.en;
+      if (c.ex) e.ex = c.ex;
+      store.cards[k] = e;
+    }
+    await chrome.storage.local.set({ [LEARN_KEY]: store });
+  } catch { /* transient storage error: drop this batch, no retry */ }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.target === "minus-offscreen") return; // not for us
   (async () => {
@@ -505,6 +539,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const resp = await askOffscreen({ type: "engine-status", engineKind });
           sendResponse(resp);
         }
+      } else if (msg.type === "minus:learn-seen") {
+        recordSeen(msg.card);       // a flashcard word was shown on a blocked ad
+        sendResponse({ ok: true });
       } else if (msg.type === "minus:onboarding-seen") {
         clearFirstRunHint();
         sendResponse({ ok: true });

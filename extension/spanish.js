@@ -95,8 +95,22 @@ const MINUS_DECKS = {
     { w: "言葉 (ことば)", en: "word / language", ex: "一日一つの言葉で十分。" },
     { w: "選ぶ (えらぶ)", en: "to choose", ex: "何を見るかはあなたが選ぶ。" },
   ],
+  el: [
+    { w: "η διαφήμιση", en: "the advertisement", ex: "Αυτή η διαφήμιση έχει μπλοκαριστεί." },
+    { w: "μαθαίνω", en: "to learn", ex: "Προτιμώ να μαθαίνω ελληνικά παρά να βλέπω διαφημίσεις." },
+    { w: "η οθόνη", en: "the screen", ex: "Η οθόνη είναι ελεύθερη από διαφημίσεις." },
+    { w: "ο χρόνος", en: "the time", ex: "Μη χάνεις τον χρόνο σου με διαφημίσεις." },
+    { w: "αντί για", en: "instead of", ex: "Μια καινούρια λέξη αντί για μια διαφήμιση." },
+    { w: "αγοράζω", en: "to buy", ex: "Δεν χρειάζεται να αγοράσεις τίποτα σήμερα." },
+    { w: "δωρεάν", en: "free (of charge)", ex: "Το να μαθαίνεις εδώ είναι δωρεάν." },
+    { w: "το παράθυρο", en: "the window", ex: "Κλείσε το αναδυόμενο παράθυρο." },
+    { w: "η ελευθερία", en: "freedom", ex: "Ελευθερία από διαφημίσεις, ελευθερία του μυαλού." },
+    { w: "η λέξη", en: "the word", ex: "Μία λέξη την ημέρα είναι αρκετή." },
+    { w: "διαλέγω", en: "to choose", ex: "Εσύ διαλέγεις τι βλέπεις." },
+    { w: "ευχαριστώ", en: "thank you", ex: "Ευχαριστώ για τη βοήθειά σου." },
+  ],
 };
-const MINUS_LANGS = { es: "Spanish", fr: "French", de: "German", it: "Italian", pt: "Portuguese", ja: "Japanese" };
+const MINUS_LANGS = { es: "Spanish", fr: "French", de: "German", it: "Italian", pt: "Portuguese", ja: "Japanese", el: "Greek" };
 // Back-compat alias (content.js historically read MINUS_SPANISH).
 const MINUS_SPANISH = MINUS_DECKS.es;
 

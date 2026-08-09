@@ -38,11 +38,27 @@ The quick panel:
   (a countdown + *Resume now* replace the buttons while paused).
 - **Ad types** — independent **Video ads** and **Display ads** toggles (applied
   live, no reload).
+- **📚 Review flashcards** — opens the review page; the button shows how many
+  cards are due so the words you meet on ads don't just flash by (see below).
 - **Ad threshold**, **Engine** picker, live engine status.
 - **Contribute anonymous ad snapshots** — opt-in, off by default (see Privacy).
   When it's on, each overlay gets a **⚑ not an ad** button (revealed on hover /
   focus) to report a false positive so the snapshot is flagged for review.
 - **⚙ options** — opens the full options page.
+
+## Learn as you block (spaced repetition)
+
+The flashcards aren't just decoration. **Every word Minus shows on a blocked ad
+is quietly saved**, and the **Review** page turns them into a real
+spaced-repetition deck (like Anki, built in):
+
+- Grade each card **Again / Good / Easy** (keyboard: `space` to flip, `1/2/3` to
+  grade). An SM-2-style scheduler spaces words you know further out and brings
+  back the ones you miss; new cards are introduced a handful at a time per day.
+- A progress strip tracks **seen · learning · learned · to review**, filterable
+  by language, so the ads you *would* have watched become vocabulary you keep.
+- Nothing leaves your machine — progress lives in local storage; the **Learning**
+  section of the options page shows your stats and can reset progress.
 
 ## The options page (⚙ in the popup, or right-click the icon → Options)
 
@@ -50,9 +66,9 @@ A full-page superset of the popup, plus settings that only live here:
 
 - **Block action** — what appears over a blocked ad:
   - **Language flashcards** (default) in **Spanish, French, German, Italian,
-    Portuguese, or Japanese** — a **500-word deck per language** (`decks/*.json`),
-    every blocked ad becomes a vocabulary card (word → translation → example
-    sentence), with a live preview.
+    Portuguese, Japanese, or Greek** — a **500-word deck per language**
+    (`decks/*.json`), every blocked ad becomes a vocabulary card (word →
+    translation → example sentence), with a live preview.
   - **Minimal** — a quiet dark card that just says the ad was blocked.
   - Toggle the **model-confidence tag** ("ad 97%") shown on each card.
   - Changes apply to overlays already on screen — no reload.

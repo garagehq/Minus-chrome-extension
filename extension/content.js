@@ -594,6 +594,9 @@
         || (typeof MINUS_DECKS !== "undefined" && MINUS_DECKS[blockLang]) || MINUS_SPANISH;
       const card = deck[Math.floor(Math.random() * deck.length)];
       w = card.w ?? card.es; en = card.en || ""; ex = card.ex || "";
+      // Record the exposure so this word can enter spaced-repetition review
+      // (background coalesces; a new word becomes a "new" card due now).
+      if (w) sendMsg({ type: "minus:learn-seen", card: { l: blockLang, w, en, ex } });
     }
     // Skeleton via innerHTML (static, first-party), dynamic strings via
     // textContent (never HTML — safe even if a future deck string contains

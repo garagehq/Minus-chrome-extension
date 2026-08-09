@@ -27,6 +27,22 @@ async function refreshCount() {
   } catch {}
 }
 
+// Review entry point: show how many cards are queued (due reviews + today's new
+// allowance) and open the full review page in a tab.
+async function refreshReview() {
+  try {
+    const store = await minusLearnLoad();
+    const s = minusLearnStats(store, Date.now(), "all");
+    const queued = minusBuildQueue(store, Date.now(), "all").length;
+    const btn = document.getElementById("reviewBtn");
+    btn.innerHTML = queued > 0 ? `📚 Review flashcards <b>(${queued})</b>` : "📚 Review flashcards";
+    btn.title = s.seen > 0 ? `${s.seen} words seen · ${s.learned} learned` : "Words you see on blocked ads appear here to review";
+  } catch {}
+}
+document.getElementById("reviewBtn").addEventListener("click", () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL("review.html") });
+});
+
 async function refreshStatus() {
   const el = document.getElementById("status");
   const bar = document.getElementById("bar");
@@ -107,6 +123,7 @@ async function load() {
   ask({ type: "minus:onboarding-seen" });
 
   refreshPause();
+  refreshReview();
   refreshStatus();
   refreshCount();
   setInterval(() => { refreshStatus(); refreshCount(); refreshPause(); }, 1000);
