@@ -17,7 +17,11 @@ telemetry. The model *sees* what you see.
   covers in-player `<video>` ads (re-sampled every ~2.5 s with 2-verdict
   hysteresis, like the minus device) *and* video ads inside cross-origin iframe
   players it can't see into (a top-frame motion sampler). Verified covering real
-  ads on YouTube, USA Today, and Al Jazeera.
+  ads on YouTube, USA Today, and Al Jazeera. A covered player **uncovers the
+  moment the ad ends** (the model re-reads the live frame each tick). Genuinely
+  DRM-protected players (some Vevo music videos) render as an unreadable black
+  hardware overlay — their pre-rolls can't be *read*, so they aren't covered, but
+  the guard makes sure their **content** is never mistakenly covered either.
 - Overlays **yield to page UI** — if a modal/lightbox opens over a covered ad,
   the flashcard steps aside (clip-path hole) so the dialog stays clickable.
 
@@ -26,13 +30,18 @@ telemetry. The model *sees* what you see.
 The quick panel:
 
 - **Ads blocked on this page** counter (mirrors the toolbar badge; the M icon is
-  blue at rest, red while blocking).
-- **Block ads (all sites)** — master on/off.
+  blue at rest, red while blocking) plus an **all-time blocked** tally.
+- **Block ads (all sites)** — master on/off. Turning it off fully unloads the
+  model from the engine (frees GPU memory).
 - **Block on this site** — per-hostname toggle.
+- **Pause 10m / 30m / 1h** — snooze blocking, then it **auto-resumes** on a timer
+  (a countdown + *Resume now* replace the buttons while paused).
 - **Ad types** — independent **Video ads** and **Display ads** toggles (applied
   live, no reload).
 - **Ad threshold**, **Engine** picker, live engine status.
 - **Contribute anonymous ad snapshots** — opt-in, off by default (see Privacy).
+  When it's on, each overlay gets a **⚑ not an ad** button (revealed on hover /
+  focus) to report a false positive so the snapshot is flagged for review.
 - **⚙ options** — opens the full options page.
 
 ## The options page (⚙ in the popup, or right-click the icon → Options)
@@ -61,14 +70,15 @@ the popup (reloads the engine).
 `"thresholds": { "ctx": …, "bare": … }` — the confidence bars content.js applies
 to ad-context elements (iframes / ad-slots) and bare standard-size images.
 Each model ships its own operating point instead of inheriting a predecessor's;
-the current default (Iter 27b) runs 0.60 / 0.88. When a model's score
+the current default (Iter 28) runs 0.60 / 0.88. When a model's score
 distribution separates ads cleanly, looser gates buy recall for free — the
 Iter 24 era shipped 0.35 / 0.75 and a 60-minute live A/B measured **~33 % more
 ads covered at unchanged ~90 % precision**.
 
 | Engine (`key`) | Model | Notes |
 |---|---|---|
-| **`lfm`** (default) | LFM2.5-VL-450M **Iter 27b-web**, q4/q8 ONNX (~431 MB) | Chat-widget / site-header hard negatives + scale-jitter retrain — fewest production false-positives of any iteration (bench prod-FPs 9→4 at the CTX gate; Botsonic-widget and 9GAG-signup FPs fixed live). Shipping default. **WebGPU only.** |
+| **`lfm`** (default) | LFM2.5-VL-450M **Iter 28-web**, q4/q8 ONNX (~431 MB) | Fresh 2026-08-07 streaming + static device captures (two-judge audited — the `vlm_spastic` bucket is ~72 % device-mislabeled program content). Dual-axis win: streaming holdout 99.90/98.06 (best-ever) and static-web bench FPs 16→11 with PR-curve dominance. Shipping default. **WebGPU only.** |
+| `lfm-iter27b` | LFM Iter 27b-web | Previous default (v0.3.8, chat-widget/site-header hard negatives + scale-jitter). WebGPU only. |
 | `lfm-iter26` | LFM Iter 26-web | Previous default (v0.3.7, self-promo/UI negatives). WebGPU only. |
 | `lfm-iter27` | LFM Iter 27-web | Candidate superseded by 27b (fixed Botsonic, regressed 9GAG signup). WebGPU only. |
 | `lfm-iter25` | LFM Iter 25-web | Previous default (v0.3.2, mined hard-positive retrain). WebGPU only. |
@@ -169,7 +179,11 @@ Heavier, GPU-backed suites (real model + real sites) live under `tests/` and use
 Headless WebGPU on Linux/NVIDIA needs
 `--enable-unsafe-webgpu --ignore-gpu-blocklist --use-angle=vulkan
 --enable-features=Vulkan --disable-vulkan-surface` and the full Chromium build
-(Playwright `channel: "chromium"`), not the headless shell.
+(Playwright `channel: "chromium"`), not the headless shell. Real-world **headed**
+soaks (WebGPU is happier with a real display — use `Xvfb :99`) include
+`tests/e2e_headed_multitab.mjs <N>` (multi-tab active-only + video block/unblock
++ disable-teardown across N live sites) and `tests/e2e_youtube.mjs <N>` (real
+YouTube pre-rolls: every covered player must uncover once the ad ends).
 
 ## Support
 

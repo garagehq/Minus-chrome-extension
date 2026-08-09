@@ -14,6 +14,7 @@ const DEFAULTS = {
   blockLang: "es",                   // flashcard deck language (MINUS_DECKS key)
   showConfidence: true,              // show the "ad NN%" tag on overlays
   collectOptIn: false,               // anonymous ad-snapshot contribution (opt-in)
+  pausedUntil: 0,                    // epoch ms; blocking is suspended until then (0 = not paused)
   // Pre-wired ingest endpoint so opting in just works. Collection still requires
   // collectOptIn=true (per-user, off by default), so nothing sends until a user
   // turns it on. The key only gates the endpoint against random bots — it ships
@@ -58,7 +59,7 @@ async function queueSample(sample) {
     const db = await openDb();
     await new Promise((res, rej) => {
       const tx = db.transaction("queue", "readwrite");
-      tx.objectStore("queue").put({ ...sample, queuedAt: Date.now() });
+      tx.objectStore("queue").put({ ...sample, queuedAt: sample.queuedAt ?? Date.now() });
       tx.oncomplete = res;
       tx.onerror = () => rej(tx.error);
     });
@@ -254,6 +255,7 @@ function bumpLifetime(n) {
 
 // Allowlist match: www-insensitive AND subdomain-aware, so disabling "example.com"
 // also covers "www.example.com" / "m.example.com" (exact-hostname-only surprised users).
+const isPaused = (s) => (s?.pausedUntil || 0) > Date.now();
 const normHost = (h) => String(h || "").toLowerCase().replace(/^www\./, "");
 function isDisabled(host, disabledSites) {
   const h = normHost(host);
@@ -315,17 +317,28 @@ async function closeOffscreen() {
 // "Block ads (all sites)" OFF -> unload the model entirely; back ON -> warm it
 // up again so the first page doesn't eat the whole cold-start.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || !("enabled" in changes)) return;
-  if (changes.enabled.newValue === false) {
-    closeOffscreen();
-  } else {
-    (async () => {
-      try {
-        await ensureOffscreen();
-        askOffscreen({ type: "engine-status", engineKind: (await getSettings()).engineKind });
-      } catch { /* warm-up is best-effort */ }
-    })();
+  if (area !== "local") return;
+  // Timed pause: schedule the auto-resume alarm and free the model while paused.
+  if ("pausedUntil" in changes) {
+    const until = changes.pausedUntil.newValue || 0;
+    if (until > Date.now()) chrome.alarms.create("minus-resume", { when: until });
+    else chrome.alarms.clear("minus-resume");
   }
+  if (!("enabled" in changes) && !("pausedUntil" in changes)) return;
+  (async () => {
+    try {
+      const s = await getSettings();
+      if (s.enabled === false || isPaused(s)) { closeOffscreen(); return; }
+      await ensureOffscreen();
+      askOffscreen({ type: "engine-status", engineKind: s.engineKind });
+    } catch { /* warm-up is best-effort */ }
+  })();
+});
+
+// Auto-resume when a timed pause elapses (also survives an SW restart — the
+// alarm is persisted; on wake we clear the flag, which re-warms via onChanged).
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === "minus-resume") chrome.storage.local.set({ pausedUntil: 0 });
 });
 
 function askOffscreen(msg) {
@@ -444,7 +457,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           ok: true,
           settings: {
             ...settings,
-            enabled: settings.enabled && !isDisabled(host, settings.disabledSites),
+            enabled: settings.enabled && !isDisabled(host, settings.disabledSites) && !isPaused(settings),
             // per-engine decision thresholds (models/index.json `thresholds`);
             // null -> content.js keeps its built-in defaults.
             engineThresholds: await engineThresholds(settings.engineKind),
@@ -465,6 +478,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       } else if (msg.type === "minus:queue-sample") {
         const { collectOptIn } = await getSettings();
         if (collectOptIn) await queueSample(msg.sample);
+        sendResponse({ ok: true });
+      } else if (msg.type === "minus:report-fp") {
+        // User pressed "not an ad": a verified false positive — the strongest
+        // training signal. Queue it past the retract cool-down (queuedAt 0 =
+        // immediately due) and flush. Respects collectOptIn via uploadDueSamples.
+        if (msg.sample) { await queueSample({ ...msg.sample, queuedAt: 0 }); uploadDueSamples(); }
         sendResponse({ ok: true });
       } else if (msg.type === "minus:retract-sample") {
         await retractSample(msg.key);

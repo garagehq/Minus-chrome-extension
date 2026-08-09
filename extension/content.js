@@ -49,6 +49,16 @@
   ];
   const STD_TOL = 0.14;                     // ±14% render tolerance
   const MIN_CROP_STDDEV = 11;              // reject near-blank crops (whitespace/nav wrappers)
+  const BLACK_LUMA = 12;                    // a DIRECTLY-read video frame this dark = unreadable (trusted read, so tight)
+  // The SCREENSHOT fallback only runs for videos whose direct read is tainted
+  // (= DRM/Vevo). Such video renders as a black/dark letterbox in tab captures —
+  // we can't actually SEE it, so we can neither detect its ad nor its content.
+  // Treat a dark/low-variance screenshot crop of a tainted video as unreadable
+  // (non-ad) with a much more generous bar than a trusted direct read, so a
+  // Vevo player is never left covered on a letterbox (a genuinely visible ad in
+  // a player is bright + high-variance, well above these).
+  const SHOT_DARK_LUMA = 46;
+  const SHOT_MIN_STD = 22;
 
   let enabled = true;
   let blockVideo = true, blockDisplay = true; // per-type toggles (popup)
@@ -66,6 +76,7 @@
   }
   const allowed = new WeakSet();           // user clicked X
   const sampleKeys = new WeakMap();        // element -> queued sample key (for retraction)
+  const cropByEl = new WeakMap();          // element -> {img,p_ad,w,h} for a "not an ad" report (opt-in only)
   const verdictCache = new Map();          // signature -> is_ad
   const overlays = new Map();              // element -> overlay div
   const videoState = new Map();            // video element -> {adVotes, nonAdVotes, blocked, src, pausedSince} (Map, not WeakMap, so the sampler can prune stale-blocked overlays)
@@ -167,7 +178,7 @@
     if (area !== "local") return;
     // Master enable / per-site allowlist changed → re-derive whether WE are on,
     // since the background folds disabledSites+host into `settings.enabled`.
-    if ("enabled" in changes || "disabledSites" in changes) {
+    if ("enabled" in changes || "disabledSites" in changes || "pausedUntil" in changes) {
       sendMsg({ type: "minus:settings" }).then((resp) => {
         if (resp?.ok) applyEnabledState(resp.settings.enabled);
       });
@@ -200,6 +211,7 @@
   // background holds it for a 10-minute cool-down; clicking X retracts it.
   function maybeQueueSample(el, crop, r) {
     if (!collectOptIn || !crop) return;
+    cropByEl.set(el, { img: crop, p_ad: r.p_ad, w: Math.round(el.getBoundingClientRect().width), h: Math.round(el.getBoundingClientRect().height) });
     const key = `${location.hostname}|${Date.now()}|${Math.random().toString(36).slice(2, 8)}`;
     sampleKeys.set(el, key);
     sendMsg({
@@ -368,6 +380,17 @@
       if (allowed.has(el) || overlays.has(el)) return false;
       if (el.closest?.("[data-minus-overlay]")) return false;
       if (isConsentUI(el)) return false;                  // cookie/CMP banners are not ads
+      // Video players belong to the <video> sampler, which re-verifies over time
+      // and UNCOVERS when the ad ends. The display path must never cover a player:
+      // YouTube toggles an "ad-showing"/"ad-interrupting" class on the player
+      // container (matching AD_HINT), so the display scan would stack persistent,
+      // never-clearing covers on the player over the whole video (the "YouTube ad
+      // blocked then never recovers" bug).
+      if (el.tagName === "VIDEO") return false;
+      if (el.tagName !== "IMG" && el.tagName !== "IFRAME") {
+        const v = el.querySelector?.("video");
+        if (v) { const vr = v.getBoundingClientRect(); if (vr.width >= IFRAME_MIN_W && vr.height >= IFRAME_MIN_H) return false; }
+      }
       // An <img> whose pixels haven't loaded is a dark/blank placeholder box —
       // classifying it flags lazy-loading product/content tiles as ads (seen on
       // Nike/Wish/AliExpress grids). Skip until it actually has pixels; the next
@@ -488,6 +511,29 @@
     });
   }
 
+  // Mean luma + luma stddev of a screenshot region. Used to detect an UNREADABLE
+  // video surface: DRM / hardware-overlay video (Vevo, protected content) renders
+  // black-or-flat in tab captures, so its crop carries no real ad signal. A real
+  // ad always has visual variety (high stddev); a black or dark-uniform surface
+  // has near-zero stddev. Returns {luma, std}; luma=-1 if the region is too small.
+  function regionStats(img, rect) {
+    try {
+      const vw = document.documentElement.clientWidth || innerWidth;
+      const scale = img.width / vw;
+      const sx = Math.max(0, rect.left) * scale, sy = Math.max(0, rect.top) * scale;
+      const sw = (Math.min(rect.right, vw) - Math.max(0, rect.left)) * scale;
+      const sh = (Math.min(rect.bottom, innerHeight) - Math.max(0, rect.top)) * scale;
+      if (sw < 8 || sh < 8) return { luma: -1, std: -1 };
+      const c = document.createElement("canvas"); c.width = 24; c.height = 24;
+      const cx = c.getContext("2d"); cx.drawImage(img, sx, sy, sw, sh, 0, 0, 24, 24);
+      const d = cx.getImageData(0, 0, 24, 24).data;
+      const n = d.length / 4; let sum = 0, sumSq = 0;
+      for (let i = 0; i < d.length; i += 4) { const l = (d[i] + d[i + 1] + d[i + 2]) / 3; sum += l; sumSq += l * l; }
+      const mean = sum / n;
+      return { luma: mean, std: Math.sqrt(Math.max(0, sumSq / n - mean * mean)) };
+    } catch { return { luma: -1, std: -1 }; }
+  }
+
   function cropFromShot(img, rect) {
     // screenshot is in physical pixels; rect is in CSS pixels. Use clientWidth
     // (the rendered content width) not innerWidth (which includes the scrollbar
@@ -554,13 +600,18 @@
     // markup). The flashcard text is aria-hidden so a screen reader doesn't read
     // random foreign vocabulary injected over every blocked ad; only the labeled
     // reveal button is exposed.
+    // The "not an ad" report only appears when the user has opted into
+    // contribution (so a click is a consented submission of that one crop).
+    const reportBtn = collectOptIn
+      ? `<button class="minus-report" aria-label="Report: this is not an ad">⚑ not an ad</button>` : "";
     div.innerHTML = `
       <button class="minus-x" aria-label="Reveal the ad blocked by Minus" title="Show this ad">&times;</button>
       <div class="minus-brand" aria-hidden="true">minus</div>
       <div class="minus-es" aria-hidden="true"></div>
       <div class="minus-en" aria-hidden="true"></div>
       <div class="minus-ex" aria-hidden="true"></div>
-      <div class="minus-p" aria-hidden="true"></div>`;
+      <div class="minus-p" aria-hidden="true"></div>
+      ${reportBtn}`;
     div.querySelector(".minus-es").textContent = w;
     div.querySelector(".minus-en").textContent = en;
     div.querySelector(".minus-ex").textContent = ex;
@@ -576,6 +627,25 @@
       // user said "show it" -> retract any queued contribution for this element
       const key = sampleKeys.get(el);
       if (key) sendMsg({ type: "minus:retract-sample", key });
+    });
+    div.querySelector(".minus-report")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      // Reveal the ad AND submit it as a user-verified false positive (the
+      // strongest training signal — a human said "this isn't an ad").
+      allowed.add(el);
+      const crop = cropByEl.get(el);
+      const key = sampleKeys.get(el);
+      if (key) sendMsg({ type: "minus:retract-sample", key }); // don't also keep the passive "ad" sample
+      if (crop?.img) {
+        sendMsg({ type: "minus:report-fp", sample: {
+          key: `fp|${location.hostname}|${Date.now()}|${Math.random().toString(36).slice(2, 8)}`,
+          img: crop.img, p_ad: crop.p_ad, verdict: "user_fp", host: location.hostname,
+          w: crop.w, h: crop.h,
+        } });
+      }
+      div.remove();
+      overlays.delete(el);
+      reportBlocked();
     });
   }
 
@@ -743,6 +813,11 @@
   // own overlay (avoids the "flashcard looks like an ad slate" deadlock) and
   // works for same-origin + MSE playback (YouTube et al). Falls back to a
   // tab-screenshot crop for tainted canvases, hiding the overlay for a beat.
+  // Returns { url, luma, std } for a directly-readable <video> frame, or null if
+  // the frame can't be read (tainted / no dimensions). luma+std let the sampler
+  // reject a low-signal (dark, near-flat) frame as not-a-confident-ad — a music
+  // video's dark opening should not be covered as an ad, and a black surface
+  // must not hold a cover.
   function frameFromVideo(v) {
     try {
       if (!v.videoWidth) return null;
@@ -750,8 +825,17 @@
       const scale = Math.min(1, 960 / v.videoWidth);
       canvas.width = Math.round(v.videoWidth * scale);
       canvas.height = Math.round(v.videoHeight * scale);
-      canvas.getContext("2d").drawImage(v, 0, 0, canvas.width, canvas.height);
-      return canvas.toDataURL("image/png"); // throws if tainted
+      const cx = canvas.getContext("2d");
+      cx.drawImage(v, 0, 0, canvas.width, canvas.height);
+      const url = canvas.toDataURL("image/png"); // throws if tainted
+      // sample a 24x24 downscale for luma/std (cheap)
+      const sc = document.createElement("canvas"); sc.width = 24; sc.height = 24;
+      const scx = sc.getContext("2d"); scx.drawImage(canvas, 0, 0, 24, 24);
+      const d = scx.getImageData(0, 0, 24, 24).data; const nn = d.length / 4;
+      let sum = 0, sumSq = 0;
+      for (let i = 0; i < d.length; i += 4) { const l = (d[i] + d[i + 1] + d[i + 2]) / 3; sum += l; sumSq += l * l; }
+      const mean = sum / nn;
+      return { url, luma: mean, std: Math.sqrt(Math.max(0, sumSq / nn - mean * mean)) };
     } catch {
       return null;
     }
@@ -796,10 +880,14 @@
     if (!videos.length) return;
 
     const crops = [], kept = [], needShot = [];
+    const unreadable = new WeakSet(); // frame too dark/flat to be a confident ad
     for (const v of videos) {
       const direct = frameFromVideo(v);
       if (direct) {
-        crops.push(direct); kept.push(v);
+        crops.push(direct.url); kept.push(v);
+        // A dark, near-flat frame (a music video's dark opening, a black surface)
+        // is not a confident ad — don't let it block/hold a cover.
+        if (direct.luma < BLACK_LUMA || direct.std < MIN_CROP_STDDEV) unreadable.add(v);
         // tell the top frame this iframe's video is directly readable — it can
         // skip screenshot-peeking (and card-blinking) our iframe entirely
         if (!IS_TOP && Date.now() - (window.__minusLastHello || 0) > 5000) {
@@ -821,8 +909,18 @@
       hidden.forEach((d) => (d.style.visibility = ""));
       if (shot) {
         for (const v of needShot) {
-          const crop = cropFromShot(shot, v.getBoundingClientRect());
-          if (crop) { crops.push(crop); kept.push(v); }
+          const rect = v.getBoundingClientRect();
+          const crop = cropFromShot(shot, rect);
+          if (crop) {
+            crops.push(crop); kept.push(v);
+            // A blocked video read only via screenshot (direct read tainted =
+            // likely DRM) whose crop is black or dark-uniform is UNREADABLE — we
+            // can't actually see it, so it must not stay covered on content.
+            const { luma, std } = regionStats(shot, rect);
+            // Aggressive bar: this is the tainted (DRM) path — a dark/flat crop
+            // is a hardware-overlay letterbox we can't read, not a visible ad.
+            if (luma >= 0 && (luma < SHOT_DARK_LUMA || std < SHOT_MIN_STD)) unreadable.add(v);
+          }
         }
       }
     }
@@ -835,7 +933,14 @@
       if (r.error) return; // transient errors are not votes
       const v = kept[i];
       const st = videoState.get(v) || { adVotes: 0, nonAdVotes: 0, blocked: false };
-      if (r.is_ad) { st.adVotes++; st.nonAdVotes = 0; } else { st.nonAdVotes++; st.adVotes = 0; }
+      // A black (unreadable) crop is NOT a confident ad. DRM/hardware-overlay
+      // video (Vevo etc.) is CORS-tainted for a direct read AND renders black in
+      // tab captures — so we can never actually SEE it. Counting black as "ad"
+      // left such a player covered forever on content (the Adele-Hello case);
+      // treat it as non-ad so a covered unreadable video clears and an unblocked
+      // one is never covered on a black frame.
+      const isAd = r.is_ad && !unreadable.has(v);
+      if (isAd) { st.adVotes++; st.nonAdVotes = 0; } else { st.nonAdVotes++; st.adVotes = 0; }
       if (!st.blocked && st.adVotes >= VIDEO_HYSTERESIS) {
         st.blocked = true;
         st.src = v.currentSrc || v.src || "";   // ad's source; a swap to content clears the card

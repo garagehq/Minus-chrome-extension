@@ -142,6 +142,37 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
   read their <video> directly announce `__minusInnerVideo` and are never
   screenshot-peeked. Regression: `tests/test_no_blink.mjs` (counts hide
   TRANSITIONS with attributeOldValue — naive style-mutation counting inflates).
+- **In-player video ("blocks the ad then never unblocks"): a covered player must
+  UNCOVER on content.** Four distinct root causes, all fixed:
+  (1) *Display path covered the YouTube player* — YouTube adds `ad-showing`/
+  `ad-interrupting` CLASSES that match `AD_HINT`, so the display scanner treated
+  the whole player as a display ad. `candidates()` now excludes `<video>` and any
+  container holding a player-sized `<video>`.
+  (2) *Dark-content direct-read FP* — a music video's dark opening read directly
+  as a "confident ad" and held a cover. A direct frame below `BLACK_LUMA`(12)/
+  `MIN_CROP_STDDEV`(11) is `unreadable` → not a confident ad.
+  (3) *Vevo/DRM letterbox screenshot FP* — a hardware-overlay video is CORS-tainted
+  for a direct read AND renders as a dark letterbox in `captureVisibleTab`; that
+  letterbox scored as an ad and stuck forever. The tainted-screenshot path uses an
+  AGGRESSIVE `unreadable` bar (`SHOT_DARK_LUMA`46/`SHOT_MIN_STD`22) — two-tier
+  because a trusted direct read deserves a tight bar but a letterbox we can't
+  actually see must never hold a cover.
+  (4) *Paused pre-roll never got a non-ad vote* — the old sampler skipped paused
+  videos, so a finished pre-roll that paused stayed covered. `sampleVideos` now
+  clears a blocked video the moment it ends / swaps src / scrolls off / sits paused
+  >3 s, and keeps re-verifying blocked-but-paused videos.
+  **Inherent limit:** genuinely DRM/hardware-overlay video (tainted + black in tab
+  captures) can't be read at all, so its pre-rolls can't be covered — the guard's
+  job is only to ensure we never FP-cover its *content* instead.
+- **Testing real YouTube (`tests/e2e_youtube.mjs`): ad delivery is
+  non-deterministic and the `.ytp-ad-*`/`.ad-showing` selectors are UNRELIABLE**
+  (they stay `true` during pure content — observed 76 s straight). Don't gate on
+  them. YouTube frames ARE directly readable here, so the model re-reads content
+  every tick and self-clears; the harness therefore skip-spams and waits a 140 s
+  window (longer than any real YT ad break) before calling a still-covered player
+  stuck, and captures `*_STUCK.png` for review. `tests/probe_stuck.mjs` polls the
+  live sampler read for one-off diagnosis (uses a debug DOM attr not present in
+  ship builds). 20-video confirm: covered=4, recovered=4, stuck=0.
 - **`pkill -f <pattern>` can match the invoking shell's own command line** and
   SIGTERM your session (exit 144). Kill by exact PID or `pkill -x chrome`.
 - Chrome caches the MV3 SW script in the profile — the harness scrubs

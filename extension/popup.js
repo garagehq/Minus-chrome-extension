@@ -1,4 +1,4 @@
-const DEFAULTS = { threshold: 0.5, enabled: true, engineKind: "lfm", disabledSites: [], collectOptIn: false, blockVideo: true, blockDisplay: true };
+const DEFAULTS = { threshold: 0.5, enabled: true, engineKind: "lfm", disabledSites: [], collectOptIn: false, blockVideo: true, blockDisplay: true, pausedUntil: 0 };
 
 let currentHost = "";
 let currentTabId = null;
@@ -106,10 +106,37 @@ async function load() {
   // NEW badge + tooltip hint if the welcome page didn't already.
   ask({ type: "minus:onboarding-seen" });
 
+  refreshPause();
   refreshStatus();
   refreshCount();
-  setInterval(() => { refreshStatus(); refreshCount(); }, 1500);
+  setInterval(() => { refreshStatus(); refreshCount(); refreshPause(); }, 1000);
 }
+
+// Timed-pause UI: swap the "Pause 10/30/60m" buttons for a "Paused — resumes in
+// X" row + Resume, and reflect it in the master toggle's look.
+function refreshPause() {
+  chrome.storage.local.get({ pausedUntil: 0 }).then(({ pausedUntil }) => {
+    const paused = pausedUntil > Date.now();
+    document.getElementById("pauseRow").style.display = paused ? "none" : "flex";
+    document.getElementById("pausedRow").style.display = paused ? "flex" : "none";
+    if (paused) {
+      const left = Math.max(0, pausedUntil - Date.now());
+      const m = Math.floor(left / 60000), sec = Math.floor((left % 60000) / 1000);
+      document.getElementById("pausedMsg").textContent = `Paused — ${m}:${String(sec).padStart(2, "0")}`;
+    }
+  }).catch(() => {});
+}
+for (const b of document.querySelectorAll(".pausebtn[data-min]")) {
+  b.addEventListener("click", async () => {
+    const mins = parseInt(b.dataset.min, 10);
+    await chrome.storage.local.set({ pausedUntil: Date.now() + mins * 60000 });
+    refreshPause();
+  });
+}
+document.getElementById("resumeBtn").addEventListener("click", async () => {
+  await chrome.storage.local.set({ pausedUntil: 0 });
+  refreshPause();
+});
 
 async function saveGeneral() {
   await chrome.storage.local.set({

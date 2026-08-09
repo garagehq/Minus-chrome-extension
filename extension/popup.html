@@ -33,6 +33,12 @@
       text-shadow: 0 0 12px rgba(59,130,246,0.6); }
     .stat .statlabel { font-size: 16px; color: var(--muted); letter-spacing: 0.04em; max-width: 150px; }
     .lifetime { text-align: center; font-size: 14px; color: var(--muted); margin: -2px 0 10px; letter-spacing: 0.03em; }
+    .pause { display: flex; gap: 6px; padding: 6px 0 2px; align-items: center; }
+    .pause #pausedMsg { font-size: 15px; color: #f0b866; flex: 1; }
+    .pausebtn { flex: 1; background: var(--panel); border: 1px solid var(--line); color: var(--ink);
+      font-family: "VT323", monospace; font-size: 15px; padding: 5px 4px; border-radius: 3px; cursor: pointer; letter-spacing: 0.03em; }
+    .pausebtn:hover { border-color: var(--blue); color: #fff; }
+    #resumeBtn { flex: 0 0 auto; }
 
     /* Controls: generous vertical rhythm */
     .row { display: flex; align-items: center; gap: 12px; padding: 9px 0; }
@@ -91,6 +97,16 @@
     <label for="siteEnabled" class="rl" id="siteLabel">Block on this site</label>
   </div>
 
+  <div class="pause" id="pauseRow">
+    <button class="pausebtn" data-min="10">Pause 10m</button>
+    <button class="pausebtn" data-min="30">Pause 30m</button>
+    <button class="pausebtn" data-min="60">Pause 1h</button>
+  </div>
+  <div class="pause" id="pausedRow" style="display:none">
+    <span id="pausedMsg">Paused</span>
+    <button class="pausebtn" id="resumeBtn">Resume now</button>
+  </div>
+
   <label class="field">Ad types</label>
   <div class="row">
     <label class="toggle-switch"><input type="checkbox" id="blockVideo"><span class="toggle-slider"></span></label>
@@ -110,8 +126,8 @@
   <input type="text" id="threshold">
   <label class="field" for="engineKind">Engine</label>
   <select id="engineKind">
-    <option value="lfm">LFM Iter 26-web (default — self-promo hard-negative retrain)</option>
-    <option value="lfm-iter25">LFM Iter 25-web (previous default)</option>
+    <option value="lfm">LFM Iter 28-web (default)</option>
+    <option value="lfm-iter27b">LFM Iter 27b-web (previous default)</option>
     <option value="lfm-iter24">LFM Iter 24-web (previous default)</option>
     <option value="lfm-iter21">LFM Iter 21-web (previous default)</option>
     <option value="lfm-iter22">LFM Iter 22-web (experimental — higher web-ad recall)</option>

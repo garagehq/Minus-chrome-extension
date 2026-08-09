@@ -43,5 +43,35 @@ ok("deck strings set via textContent, not innerHTML (xss-safe)", /\.minus-es"\)\
 // --- lifetime stat ---
 ok("background tallies a lifetime blocked count", /lifetimeBlocked/.test(bg) && /bumpLifetime/.test(bg));
 
+
+ok("display scan excludes video players (YouTube recovery fix)", /el\.tagName === "VIDEO"[\s\S]{0,220}querySelector\?\.\("video"\)/.test(content));
+
+ok("video sampler treats a black (unreadable) crop as non-ad (DRM/Vevo recovery)", /BLACK_LUMA/.test(content) && /unreadable\.has\(v\)/.test(content));
+
+// Two-tier unreadable thresholds: a DIRECT (trusted) read uses a tight bar
+// (BLACK_LUMA/MIN_CROP_STDDEV); the tainted-screenshot (DRM) path uses an
+// aggressive bar (SHOT_DARK_LUMA/SHOT_MIN_STD) because a dark screenshot crop is
+// a hardware-overlay letterbox we can't actually read.
+ok("direct read uses the tight unreadable bar", /direct\.luma < BLACK_LUMA \|\| direct\.std < MIN_CROP_STDDEV/.test(content));
+ok("tainted screenshot path uses the aggressive unreadable bar", /luma < SHOT_DARK_LUMA \|\| std < SHOT_MIN_STD/.test(content));
+ok("aggressive bar is looser than the tight bar (SHOT_DARK_LUMA > BLACK_LUMA)", (() => {
+  const dark = +(content.match(/const SHOT_DARK_LUMA = (\d+)/) || [])[1];
+  const black = +(content.match(/const BLACK_LUMA = (\d+)/) || [])[1];
+  const sstd = +(content.match(/const SHOT_MIN_STD = (\d+)/) || [])[1];
+  const mstd = +(content.match(/const MIN_CROP_STDDEV = (\d+)/) || [])[1];
+  return dark > black && sstd > mstd;
+})());
+
+// --- timed pause ---
+ok("background computes effective-enabled including pause", /!isPaused\(settings\)/.test(bg) && /const isPaused =/.test(bg));
+ok("background schedules an auto-resume alarm", /minus-resume/.test(bg));
+ok("popup has pause + resume controls", /class="pausebtn"/.test(readFileSync(join(EXT,"popup.html"),"utf8")) && /pausedUntil: Date\.now\(\)/.test(readFileSync(join(EXT,"popup.js"),"utf8")));
+ok("content reacts to pausedUntil", /"pausedUntil" in changes/.test(content));
+
+// --- false-positive reporting ---
+ok("background handles a user false-positive report", /minus:report-fp/.test(bg) && /user_fp/.test(bg) || /queuedAt: 0/.test(bg));
+ok("content sends a user_fp report with the crop", /minus:report-fp/.test(content) && /verdict: "user_fp"/.test(content));
+ok("FP report gated on opt-in (only rendered when collecting)", /collectOptIn[\s\S]{0,80}minus-report/.test(content));
+
 console.log(f ? `\n${f} failure(s)` : "\nall green");
 process.exit(f ? 1 : 0);
