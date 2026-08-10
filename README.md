@@ -1,5 +1,7 @@
 # Minus — vision ad blocker (Chrome extension)
 
+[![Model on Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Model-Minus--v0.1-blue)](https://huggingface.co/TheGarageDev/Minus-v0.1)
+
 The browser cousin of the [minus](https://github.com/garagehq/minus) HDMI
 device: instead of matching filter lists, it **looks** at page elements with a
 vision-language model running **entirely inside your browser** and covers the
