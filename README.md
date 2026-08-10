@@ -2,13 +2,101 @@
 
 The browser cousin of the [minus](https://github.com/garagehq/minus) HDMI
 device: instead of matching filter lists, it **looks** at page elements with a
-vision model running **entirely inside your browser** and covers the ones that
-are ads with Spanish flashcards. Every card shows a faint ✕ — click it to
-reveal the ad if you actually wanted it (a transient **↩ re-block** chip lets
-you undo an accidental reveal).
+vision-language model running **entirely inside your browser** and covers the
+ones that are ads with language flashcards — so every blocked ad teaches you a
+word instead.
 
 Nothing leaves your machine — no server, no filter-list subscriptions, no
 telemetry. The model *sees* what you see.
+
+![Minus covering ads on The Verge with Spanish flashcards](docs/screenshots/site_theverge_com.png)
+*Real page, real ads: the banner and sidebar ad slots on theverge.com covered by
+flashcards ("la puerta — the door", "cuánto — how much"), each with the model's
+confidence tag and a faint ✕ to reveal the ad. The article is untouched.*
+
+## How it works
+
+A classic ad blocker matches **URLs** against filter lists. Minus classifies
+**pixels** — so first-party ads, sponsored tiles, native "chum-box" placements
+and streaming video ads that lists can't describe still get caught, and nothing
+breaks when ad-tech rotates domains.
+
+The pipeline, end to end:
+
+1. **Find candidates.** The content script (running in every frame) collects
+   elements that *could* be ads: `<img>`s and `<iframe>`s, plus containers whose
+   id/class smells like an ad slot. Obvious non-ads are filtered structurally —
+   consent banners, video *players* (they belong to the video path), unloaded
+   image placeholders, content-column-shaped boxes.
+2. **Look at them.** For each candidate, Minus grabs actual pixels: a cropped
+   tab screenshot for display elements (rate-limited, active tab only), or a
+   direct frame read for `<video>`.
+3. **Ask the model.** Crops go to a 450 M-parameter vision-language model —
+   [**Minus-v0.1**](https://huggingface.co/GarageCyril/Minus-v0.1) — running on
+   your GPU via WebGPU (transformers.js + ONNX Runtime Web, quantized to
+   ~430 MB). It answers one question per crop: *"Is this an advertisement?"* —
+   and the Yes/No logits give a calibrated `p(ad)`.
+4. **Decide with tiered thresholds.** An element *in ad context* (an ad iframe,
+   a slot container) blocks at `p ≥ 0.60`; a bare image must clear `p ≥ 0.88`
+   **and** be a standard ad shape (near-square product/editorial tiles are never
+   blocked). Video verdicts need two consecutive ad frames (hysteresis), and a
+   covered player keeps re-verifying so it **uncovers the moment the ad ends**.
+5. **Cover, don't break.** Blocked elements get a flashcard overlay (word →
+   translation → example sentence). The page layout is untouched; overlays track
+   their element, step aside for modals, and carry a faint ✕ (reveal, with a
+   transient **↩ re-block** undo) and an opt-in **⚑ not an ad** report button.
+6. **Learn.** Every word shown on a blocked ad feeds the built-in
+   [spaced-repetition review](#learn-as-you-block-spaced-repetition).
+
+```
+content.js (all frames)     background.js (SW)          offscreen.js (window)
+───────────────────────     ─────────────────          ─────────────────────
+top frame: static scan  →   captureVisibleTab      →   Minus-v0.1 (transformers.js,
+  + iframe motion sampler    (rate-limited crops)       WebGPU) or SigLIP2 (ORT)
+every frame: <video>    →   route classify + badge →   P(ad) per crop
+  sampling (hysteresis)     + per-tab counter              │
+      ↑                                                    │
+  flashcard overlays  ←────────────────────────────────────┘
+```
+
+Only the **active tab** ever scans (a background tab capturing would read the
+wrong pixels), scans coalesce and self-suspend when nothing is covered, and the
+engine survives WebGPU device loss by rebuilding itself.
+
+## In the wild
+
+| | |
+|---|---|
+| ![nypost.com with covered ads](docs/screenshots/site_nypost_com.png) | ![cnet.com with a covered ad](docs/screenshots/site_cnet_com.png) |
+| *nypost.com — leaderboard + sidebar ads covered ("buenos días", "el agua")* | *cnet.com — display ad covered mid-article* |
+
+| | |
+|---|---|
+| ![The popup](docs/screenshots/popup.png) | ![Flashcard review](docs/screenshots/review_revealed.png) |
+| *The popup: counters, pause, ad-type toggles, threshold slider, engine picker* | *Review: words from blocked ads become a spaced-repetition deck* |
+
+![The options page](docs/screenshots/options.png)
+*Options: block action + flashcard language (with live preview), learning stats,
+engine picker with per-model decision gates.*
+
+## The model
+
+The default engine is [**Minus-v0.1** on Hugging Face](https://huggingface.co/GarageCyril/Minus-v0.1)
+— a fine-tune of [LiquidAI/LFM2.5-VL-450M](https://huggingface.co/LiquidAI/LFM2.5-VL-450M)
+trained over a 28-iteration campaign on streaming-TV captures from the minus
+device plus web display ads and ~10 k mined hard negatives (product photography,
+editorial content, UI elements, consent banners, chat widgets). Numbers at the
+shipping gates:
+
+| benchmark | result |
+|---|---|
+| Streaming holdout (1,956 frames) | **99.90 %** ad recall / **98.06 %** non-ad recall |
+| Static-web bench (999 images) | **98.0 %** ad recall, 11 false positives |
+| Product-image FP holdout | 1/199 |
+| Live in-browser precision | ~90–94 % over month-long soaks |
+
+The full model card — training recipe, ONNX quantization, usage from
+transformers.js — is on the Hugging Face page.
 
 ## What it blocks
 
@@ -90,14 +178,14 @@ the popup (reloads the engine).
 `"thresholds": { "ctx": …, "bare": … }` — the confidence bars content.js applies
 to ad-context elements (iframes / ad-slots) and bare standard-size images.
 Each model ships its own operating point instead of inheriting a predecessor's;
-the current default (Iter 28) runs 0.60 / 0.88. When a model's score
+the current default (Minus v0.1) runs 0.60 / 0.88. When a model's score
 distribution separates ads cleanly, looser gates buy recall for free — the
 Iter 24 era shipped 0.35 / 0.75 and a 60-minute live A/B measured **~33 % more
 ads covered at unchanged ~90 % precision**.
 
 | Engine (`key`) | Model | Notes |
 |---|---|---|
-| **`lfm`** (default) | LFM2.5-VL-450M **Iter 28-web**, q4/q8 ONNX (~431 MB) | Fresh 2026-08-07 streaming + static device captures (two-judge audited — the `vlm_spastic` bucket is ~72 % device-mislabeled program content). Dual-axis win: streaming holdout 99.90/98.06 (best-ever) and static-web bench FPs 16→11 with PR-curve dominance. Shipping default. **WebGPU only.** |
+| **`lfm`** (default) | [**Minus v0.1**](https://huggingface.co/GarageCyril/Minus-v0.1) (LFM2.5-VL-450M fine-tune), q4/q8 ONNX (~431 MB) | The open-source shipping model — streaming holdout 99.90/98.06 (best-ever), static-web bench 98.0 % ad recall @ 11 FPs with PR-curve dominance. **WebGPU only.** |
 | `lfm-iter27b` | LFM Iter 27b-web | Previous default (v0.3.8, chat-widget/site-header hard negatives + scale-jitter). WebGPU only. |
 | `lfm-iter26` | LFM Iter 26-web | Previous default (v0.3.7, self-promo/UI negatives). WebGPU only. |
 | `lfm-iter27` | LFM Iter 27-web | Candidate superseded by 27b (fixed Botsonic, regressed 9GAG signup). WebGPU only. |
@@ -155,19 +243,6 @@ Metal — both Apple Silicon and Intel Macs), Windows (D3D12), and ChromeOS, and
 on Linux more recently. So the default LFM engine runs on the GPU on essentially
 all current desktop Chrome/Edge installs. Apple Silicon Macs are an especially
 good fit (unified memory + a strong Metal GPU).
-
-## Architecture
-
-```
-content.js (all frames)     background.js (SW)          offscreen.js (window)
-───────────────────────     ─────────────────          ─────────────────────
-top frame: static scan  →   captureVisibleTab      →   LFM2.5-VL (transformers.js,
-  + iframe motion sampler    (rate-limited crops)       WebGPU) or SigLIP2 (ORT)
-every frame: <video>    →   route classify + badge →   P(ad) per crop
-  sampling (hysteresis)     + per-tab counter              │
-      ↑                                                    │
-      └────────── overlay flashcard (hover → ✕) ───────────┘
-```
 
 ## Privacy & opt-in data contribution
 

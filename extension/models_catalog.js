@@ -11,7 +11,7 @@
 export const FALLBACK_CATALOG = {
   default: "lfm",
   models: [
-    { key: "lfm", dir: "lfm-iter28", kind: "lfm", label: "LFM Iter 28-web (default)", thresholds: { ctx: 0.60, bare: 0.88 } },
+    { key: "lfm", dir: "minus-v0.1", kind: "lfm", label: "Minus v0.1 (default)", thresholds: { ctx: 0.60, bare: 0.88 } },
     { key: "lfm-iter27b", dir: "lfm-iter27b", kind: "lfm", label: "LFM Iter 27b-web (previous default)", thresholds: { ctx: 0.60, bare: 0.88 } },
     { key: "lfm-iter26", dir: "lfm-iter26", kind: "lfm", label: "LFM Iter 26-web (previous default)", thresholds: { ctx: 0.60, bare: 0.88 } },
     { key: "lfm-iter27", dir: "lfm-iter27", kind: "lfm", label: "LFM Iter 27-web (candidate)", thresholds: { ctx: 0.60, bare: 0.88 } },

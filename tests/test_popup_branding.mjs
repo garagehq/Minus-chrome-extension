@@ -52,7 +52,7 @@ try {
   check("VT323 is the real (monospace) font, not a serif fallback", Math.abs(mono.i - mono.W) < 2, `i=${mono.i} W=${mono.W}`);
   check("wordmark uses VT323", /VT323/.test(info.wordmark), info.wordmark);
   check("charset intact (dash renders, no U+FFFD)", /[–—]/.test(info.thresholdLabel) && !info.badChar, info.thresholdLabel);
-  check("default engine label is Iter 28-web (not older)", info.defaultOpt.includes("Iter 28-web") && !info.defaultOpt.includes("Iter 14"), info.defaultOpt);
+  check("default engine label is Minus v0.1 (not an internal iter name)", info.defaultOpt.includes("Minus v0.1") && !info.defaultOpt.includes("Iter 14"), info.defaultOpt);
   check("dropdown options come from index.json", JSON.stringify(info.optionValues) === JSON.stringify(info.indexKeys), JSON.stringify(info.optionValues));
 } catch (e) {
   console.log("FAIL  (exception)", String(e).split("\n")[0]);
