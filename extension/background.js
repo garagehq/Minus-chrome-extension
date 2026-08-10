@@ -14,6 +14,7 @@ const DEFAULTS = {
   blockLang: "es",                   // flashcard deck language (MINUS_DECKS key)
   showConfidence: true,              // show the "ad NN%" tag on overlays
   collectOptIn: false,               // anonymous ad-snapshot contribution (opt-in)
+  blockPopups: true,                 // popup guard: judge hijack-click popup tabs (full-page ad landings)
   pausedUntil: 0,                    // epoch ms; blocking is suspended until then (0 = not paused)
   // Pre-wired ingest endpoint so opting in just works. Collection still requires
   // collectOptIn=true (per-user, off by default), so nothing sends until a user
@@ -281,6 +282,88 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 chrome.tabs.onRemoved.addListener((tabId) => blockedByTab.delete(tabId));
 
+// ---------------------------------------------------------------- popup guard
+// Aggressive sites (manga/stream readers etc.) hijack clicks on NON-link page
+// areas to spawn popup/popunder tabs whose ENTIRE page is an ad landing.
+// Element covering can't touch those — every element there is the ad site's own
+// first-party content — so the guard works at the tab level:
+//   1. content.js reports clicks that did NOT ride a real <a href> (real
+//      target=_blank links never enter this pipeline)
+//   2. a tab created by that opener within a short window is a popup SUSPECT
+//   3. once the suspect is active + loaded (+ cross-domain from its opener),
+//      screenshot the viewport and ask the model about the PAGE itself
+//   4. p(ad) >= POPUP_GATE -> the tab's content script shows a full-page cover
+//      with an explicit choice: close the tab, or show the page. Never
+//      auto-closes — a false positive costs one extra click, not user data.
+const POPUP_GATE = 0.85;
+const POPUP_CLICK_WINDOW_MS = 3000;
+const nonLinkClickAt = new Map(); // opener tabId -> { ts, anchorHost } of last click
+const popupSuspects = new Map();  // suspect tabId -> { openerTabId, checked }
+const popupTrace = (ev, d) => { const t = (globalThis.__minusPopupTrace ||= []); t.push([ev, d]); if (t.length > 60) t.shift(); };
+const regDomain = (h) => { const p = String(h || "").toLowerCase().replace(/^www\d?\./, "").split("."); return p.length <= 2 ? p.join(".") : p.slice(-2).join("."); };
+
+chrome.tabs.onCreated.addListener((tab) => {
+  if (tab.openerTabId == null) { popupTrace("created-no-opener", tab.pendingUrl || tab.url || ""); return; }
+  const createdAt = Date.now();
+  const tryArm = (late) => {
+    if (popupSuspects.has(tab.id)) return;
+    const click = nonLinkClickAt.get(tab.openerTabId);
+    // |age| — window.open fires INSIDE the page's click handler, so the
+    // tab-created event can beat the runtime message carrying the click report
+    const armed = !!(click && Math.abs(createdAt - click.ts) <= POPUP_CLICK_WINDOW_MS);
+    popupTrace(late ? "created-late" : "created", { opener: tab.openerTabId, armed, ageMs: click ? createdAt - click.ts : -1 });
+    if (armed) {
+      popupSuspects.set(tab.id, { openerTabId: tab.openerTabId, anchorHost: click.anchorHost || null, checked: false });
+      if (late) checkPopupSuspect(tab.id); // load/activate events may already be gone
+    }
+  };
+  tryArm(false);
+  if (!popupSuspects.has(tab.id)) setTimeout(() => tryArm(true), 1200);
+});
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.status === "complete" && popupSuspects.has(tabId)) checkPopupSuspect(tabId);
+});
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  // popunders load in the background; judge them on first focus (capture needs
+  // the tab to be the active one anyway)
+  if (popupSuspects.has(tabId)) checkPopupSuspect(tabId);
+});
+chrome.tabs.onRemoved.addListener((tabId) => { popupSuspects.delete(tabId); nonLinkClickAt.delete(tabId); });
+
+async function checkPopupSuspect(tabId) {
+  const s = popupSuspects.get(tabId);
+  if (!s || s.checked) return;
+  const settings = await getSettings();
+  if (!settings.enabled || settings.blockPopups === false || isPaused(settings)) { popupSuspects.delete(tabId); return; }
+  let tab; try { tab = await chrome.tabs.get(tabId); } catch { popupSuspects.delete(tabId); return; }
+  if (tab.status !== "complete" || !tab.active || !/^https?:/.test(tab.url || "")) { popupTrace("check-defer", { st: tab.status, act: tab.active }); return; } // retry on a later event
+  try {
+    const tabDom = regDomain(new URL(tab.url).hostname);
+    // the click's DECLARED destination matches what opened -> a real link nav
+    if (s.anchorHost && regDomain(s.anchorHost) === tabDom) { popupTrace("exempt-anchor", tabDom); popupSuspects.delete(tabId); return; }
+    const opener = await chrome.tabs.get(s.openerTabId).catch(() => null);
+    if (opener?.url && /^https?:/.test(opener.url) && tabDom === regDomain(new URL(opener.url).hostname)) {
+      popupTrace("exempt-same-site", tabDom); popupSuspects.delete(tabId); return; // site opening itself (reader re-open trick) — not the ad tab
+    }
+  } catch { /* opener gone: keep judging the suspect */ }
+  s.checked = true;
+  await new Promise((r) => setTimeout(r, 1200)); // let the landing paint
+  const shot = await captureTab(tab.windowId).catch(() => null);
+  if (!shot) { popupTrace("no-shot", tabId); s.checked = false; return; } // capture raced a nav — retry on next event
+  try {
+    await ensureOffscreen();
+    const { engineKind } = settings;
+    const resp = await askOffscreen({ type: "classify", images: [shot], engineKind });
+    const p = resp?.results?.[0]?.p_ad ?? 0;
+    (globalThis.__minusPopupVerdicts ||= []).push({ url: (tab.url || "").slice(0, 100), p: +p.toFixed(3) }); // diagnosable
+    popupSuspects.delete(tabId); // one judgment per suspect; "Show page" stays shown
+    if (p >= POPUP_GATE) {
+      chrome.tabs.sendMessage(tabId, { type: "minus:popup-verdict", p_ad: p }).catch(() => {});
+      bumpLifetime(1);
+    }
+  } catch { popupSuspects.delete(tabId); }
+}
+
 // ---------------------------------------------------------------- offscreen
 let offscreenReady = null;
 
@@ -539,6 +622,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const resp = await askOffscreen({ type: "engine-status", engineKind });
           sendResponse(resp);
         }
+      } else if (msg.type === "minus:nonlink-click") {
+        // arm the popup-guard window for this tab (every click; anchorHost is
+        // the clicked link's declared destination, null for non-link clicks)
+        popupTrace("click", { tab: sender.tab?.id, anchorHost: msg.anchorHost || null });
+        if (sender.tab?.id != null) nonLinkClickAt.set(sender.tab.id, { ts: Date.now(), anchorHost: msg.anchorHost || null });
+        sendResponse({ ok: true });
+      } else if (msg.type === "minus:close-popup") {
+        // the popup cover's "Close tab" button
+        if (sender.tab?.id != null) chrome.tabs.remove(sender.tab.id).catch(() => {});
+        sendResponse({ ok: true });
       } else if (msg.type === "minus:learn-seen") {
         recordSeen(msg.card);       // a flashcard word was shown on a blocked ad
         sendResponse({ ok: true });

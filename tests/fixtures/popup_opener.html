@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Reader fixture — popup opener</title>
+<style>body{font-family:sans-serif;max-width:900px;margin:24px auto} #reader{background:#eee;height:520px;display:flex;align-items:center;justify-content:center;font-size:22px;cursor:pointer}</style>
+</head>
+<body>
+  <h1>Chapter 243</h1>
+  <p>A reader page that hijacks non-link clicks into an ad popup, the way
+  aggressive manga/stream sites do. Clicking the gray area (NOT a link) opens
+  the ad landing in a new tab. The real link below is the negative control.</p>
+  <div id="reader">[ page content — click me ]</div>
+  <p><a id="realLink" target="_blank" href="/article.html">A legitimate article link (opens a new tab)</a></p>
+  <script>
+    // classic popunder trick: any non-link click spawns the ad tab (once)
+    let fired = false;
+    document.getElementById("reader").addEventListener("click", () => {
+      if (fired) return; fired = true;
+      window.open("http://127.0.0.1:8919/ad_landing.html", "_blank");
+    });
+  </script>
+</body>
+</html>

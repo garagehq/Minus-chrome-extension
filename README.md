@@ -111,6 +111,12 @@ transformers.js — is on the Hugging Face page.
   DRM-protected players (some Vevo music videos) render as an unreadable black
   hardware overlay — their pre-rolls can't be *read*, so they aren't covered, but
   the guard makes sure their **content** is never mistakenly covered either.
+- **Popup / popunder ad tabs** — aggressive sites (manga/stream readers) hijack
+  clicks on non-link page areas to spawn tabs whose *entire page* is an ad
+  landing. The **popup guard** notices the hijacked-click → new-tab pattern,
+  asks the model about the page itself, and covers confident ad landings with an
+  explicit choice: **Close tab** or **Show page** (never auto-closes; tabs
+  opened from real links are never touched).
 - Overlays **yield to page UI** — if a modal/lightbox opens over a covered ad,
   the flashcard steps aside (clip-path hole) so the dialog stays clickable.
 

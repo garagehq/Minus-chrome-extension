@@ -90,6 +90,20 @@ ok("content reacts to pausedUntil", /"pausedUntil" in changes/.test(content));
   ok("review TO-REVIEW stat counts down (not stale)", /queue\.length - idx/.test(reviewJs));
 }
 
+// --- popup guard (hijack-click popup/popunder ad tabs) ---
+{
+  const bg = readFileSync(join(EXT, "background.js"), "utf8");
+  ok("background tracks non-link clicks + popup suspects", /nonLinkClickAt/.test(bg) && /popupSuspects/.test(bg) && /minus:nonlink-click/.test(bg));
+  ok("suspects are judged by the model at a high gate", /POPUP_GATE = 0\.8/.test(bg) && /minus:popup-verdict/.test(bg));
+  ok("same-domain popups (reader re-open trick) are exempt", /regDomain/.test(bg));
+  ok("guard is toggleable and honors pause", /blockPopups/.test(bg) && /settings\.blockPopups === false/.test(bg));
+  ok("close-tab is user-initiated, never automatic", /minus:close-popup/.test(bg) && !/tabs\.remove\(tab\.id\)/.test(bg));
+  ok("content reports non-link clicks only (anchors exempt)", /viaLink/.test(content) && /minus:nonlink-click/.test(content));
+  ok("content renders the popup cover with Close/Show choice", /minus:popup-verdict/.test(content) && /Close tab/.test(content) && /Show page/.test(content));
+  ok("disable teardown also removes the popup cover", /data-minus-popup.*\?\.remove/.test(content) || /querySelector\("\[data-minus-popup\]"\)\?\.remove/.test(content));
+  ok("popup has the popup-guard toggle", /blockPopups/.test(readFileSync(join(EXT, "popup.html"), "utf8")));
+}
+
 // --- false-positive reporting ---
 ok("background handles a user false-positive report", /minus:report-fp/.test(bg) && /user_fp/.test(bg) || /queuedAt: 0/.test(bg));
 ok("content sends a user_fp report with the crop", /minus:report-fp/.test(content) && /verdict: "user_fp"/.test(content));
