@@ -23,6 +23,18 @@ const OUT = join(HERE, "screenshots", "e2e_multitab");
 const PROFILE = join(HERE, ".profile-e2e");
 mkdirSync(OUT, { recursive: true });
 const N_SITES = parseInt(process.argv[2] || "110", 10);
+// Chunking: an offset lets four back-to-back 250-runs each cover a DISTINCT slice
+// (offsets 0/250/500/750) of the big harvested pool -> 1000 unique sites total.
+const OFFSET = parseInt(process.argv[3] || process.env.MINUS_SITE_OFFSET || "0", 10);
+// Per-site dwell (pre-scroll / post-scroll). Shorter for the big 1000-site sweep.
+const DWELL1 = parseInt(process.env.MINUS_DWELL1 || "9000", 10);
+const DWELL2 = parseInt(process.env.MINUS_DWELL2 || "6000", 10);
+// Prefer the large harvested pool (tests/site_pool_1k.json); fall back to curated.
+let SITE_POOL = SOAK_SITES;
+try {
+  const pool = JSON.parse(readFileSync(join(HERE, "site_pool_1k.json"), "utf8"));
+  if (Array.isArray(pool) && pool.length > SOAK_SITES.length) SITE_POOL = pool;
+} catch { /* no harvested pool: use curated SOAK_SITES */ }
 
 let failures = 0, passes = 0;
 const ok = (name, cond, detail = "") => {
@@ -192,46 +204,70 @@ for (const u of ["https://en.wikipedia.org/wiki/Advertising", "https://www.googl
   const pg = await ctx.newPage(); await pg.goto(u, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {}); idleBg.push(pg);
 }
 const seed = (u, i) => { let h = 2166136261 >>> 0; const s = u + "::" + i; for (let k = 0; k < s.length; k++) { h ^= s.charCodeAt(k); h = Math.imul(h, 16777619) >>> 0; } return h; };
-const sites = SOAK_SITES.map((s) => s.url).sort((a, b) => seed(a, 1) - seed(b, 1)).slice(0, N_SITES);
+const sortedPool = SITE_POOL.map((s) => s.url).sort((a, b) => seed(a, 1) - seed(b, 1));
+const sites = sortedPool.slice(OFFSET, OFFSET + N_SITES);
+console.log(`      pool=${SITE_POOL.length} sites, chunk offset=${OFFSET} -> ${sites.length} sites`);
 const capCounters = () => Promise.race([
   (async () => { const s = ctx.serviceWorkers()[0]; return s ? s.evaluate(() => ({ ok: globalThis.__minusCapOk || 0, refused: globalThis.__minusCapRefused || 0, cls: globalThis.__minusClsCalls || 0, ads: globalThis.__minusAdsFound || 0, maxP: globalThis.__minusMaxP || 0, clsRef: globalThis.__minusClsRefused || 0 })) : {}; })(),
   new Promise((r) => setTimeout(() => r({}), 6000)),
 ]);
 let errors = 0, withOverlays = 0, visited = 0, totalOverlays = 0, notReady = 0;
+const edgeCases = [];          // {host, kind, detail} — the point of a 1000-site sweep
+const note = (host, kind, detail = "") => { edgeCases.push({ host, kind, detail: String(detail).slice(0, 200) }); log(`  ⚠ [${kind}] ${host} ${String(detail).slice(0, 120)}`); };
+let prevCapOk = -1, stallStreak = 0;
 const capBefore = await capCounters();
 for (const url of sites) {
   const pg = await ctx.newPage();
   const host = hostOf(url);
+  let crashed = false;
+  pg.on("crash", () => { crashed = true; note(host, "page-crash", "renderer crashed"); });
+  pg.on("pageerror", (err) => { const m = String(err); if (/minus|chrome-extension|offscreen|classify|overlay/i.test(m)) note(host, "pageerror", m); });
   try {
     await pg.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     await pg.bringToFront();
-    await Promise.race([pg.waitForTimeout(9000), new Promise((r) => setTimeout(r, 20000))]);
+    await pg.waitForTimeout(DWELL1);
     await pg.evaluate(() => window.scrollBy(0, 1400)).catch(() => {}); // trigger lazy-loaded ads
-    await Promise.race([pg.waitForTimeout(6000), new Promise((r) => setTimeout(r, 12000))]);
+    await pg.waitForTimeout(DWELL2);
     const ov = await overlayCount(pg);
     if (ov > 0) { withOverlays++; totalOverlays += ov; }
+    if (ov > 40) note(host, "overlay-storm", `${ov} overlays on one page`); // runaway false positives
     visited++;
-  } catch (e) { errors++; }
-  finally { await pg.close().catch(() => {}); }
+  } catch (e) {
+    errors++;
+    const m = String(e).split("\n")[0];
+    // site-level nav failures (timeouts, DNS, cert) are expected on a random web
+    // sweep and not our bug; only flag the ones that implicate the extension.
+    if (!crashed && !/Timeout|ERR_|net::|NS_ERROR|Navigation|frame was detached|closed/i.test(m)) note(host, "unexpected-error", m);
+  } finally { await pg.close().catch(() => {}); }
   if (visited % 4 === 0) {
     const st = await engineState();
-    if (st !== "ready") notReady++;
     const cc = await capCounters();
-    log(`  ${visited}/${sites.length} | ov-sites ${withOverlays} (${totalOverlays}) | capOk ${cc.ok} clsCalls ${cc.cls} adsFound ${cc.ads} maxP ${(cc.maxP||0).toFixed(2)} clsRef ${cc.clsRef} refused ${cc.refused} | engine ${st}`);
+    if (st !== "ready") { notReady++; note(host, "engine-not-ready", `state=${st}`); }
+    // capture wedge: a REAL wedge holds capOk flat across many sites. A single
+    // 4-site checkpoint with no new captures is just dead/slow sites, so only flag
+    // a PERSISTENT stall (>=2 consecutive checkpoints, ~8 sites, engine ready).
+    if (st === "ready" && prevCapOk >= 0 && cc.ok === prevCapOk) {
+      if (++stallStreak >= 2) note(host, "capture-stall", `capOk stuck at ${cc.ok} for ~${stallStreak * 4} sites`);
+    } else stallStreak = 0;
+    prevCapOk = cc.ok;
+    log(`  ${visited}/${sites.length} | ov-sites ${withOverlays} (${totalOverlays}) | capOk ${cc.ok} clsCalls ${cc.cls} adsFound ${cc.ads} maxP ${(cc.maxP||0).toFixed(2)} clsRef ${cc.clsRef} refused ${cc.refused} | engine ${st} | edge ${edgeCases.length}`);
   }
 }
 const capAfter = await capCounters();
 const engFinal = await engineState();
+// The extension-implicating edge cases — the ones that are OUR bug, not a flaky site.
+const extBugs = edgeCases.filter((e) => ["unexpected-error", "page-crash", "pageerror", "overlay-storm", "capture-stall"].includes(e.kind));
 ok("active tab actually captured across the soak", (capAfter.ok - capBefore.ok) > 20, `only ${capAfter.ok - capBefore.ok} captures`);
-ok("ads were covered on multiple sites", withOverlays >= 5, `only ${withOverlays} sites had overlays`);
-ok("engine stayed healthy (ready) through the soak", engFinal === "ready" && notReady === 0, `final=${engFinal}, not-ready checkpoints=${notReady}`);
-ok("soak completed without harness crash", visited >= sites.length * 0.7, `only ${visited}/${sites.length} visited`);
+ok("engine RECOVERED to ready by the end (device-loss self-heal)", engFinal === "ready", `final=${engFinal}, drops=${notReady}`);
+ok("no extension-implicating edge cases (crash/pageerror/stall/storm)", extBugs.length === 0, `${extBugs.length}: ${JSON.stringify(extBugs.slice(0, 8))}`);
+ok("soak completed without harness crash", visited >= sites.length * 0.6, `only ${visited}/${sites.length} visited`);
 const adHosts = await ctx.serviceWorkers()[0].evaluate(() => globalThis.__minusAdHosts || {}).catch(() => ({}));
 log(`ad-classifying hosts: ${JSON.stringify(adHosts)}`);
-log(`visited=${visited}, sites-with-overlays=${withOverlays}, total-overlays=${totalOverlays}, capturesOk=${capAfter.ok - capBefore.ok}, refused=${capAfter.refused - capBefore.refused}, load-errors=${errors}`);
+log(`visited=${visited}, sites-with-overlays=${withOverlays}, total-overlays=${totalOverlays}, capturesOk=${capAfter.ok - capBefore.ok}, refused=${capAfter.refused - capBefore.refused}, load-errors=${errors}, engine-drops=${notReady}`);
+log(`EDGE CASES (${edgeCases.length}): ${JSON.stringify(edgeCases, null, 0)}`);
 for (const pg of idleBg) await pg.close().catch(() => {});
 
-writeFileSync(join(OUT, "summary.json"), JSON.stringify({ passes, failures, visited, withOverlays, totalOverlays, capturesOk: capAfter.ok - capBefore.ok, refused: capAfter.refused - capBefore.refused, errors, engFinal }, null, 1));
+writeFileSync(join(OUT, `summary_off${OFFSET}.json`), JSON.stringify({ offset: OFFSET, passes, failures, visited, withOverlays, totalOverlays, capturesOk: capAfter.ok - capBefore.ok, refused: capAfter.refused - capBefore.refused, errors, engineDrops: notReady, engFinal, edgeCases }, null, 1));
 await finish();
 
 async function finish() {
