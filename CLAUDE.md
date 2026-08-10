@@ -175,8 +175,8 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
   stuck, and captures `*_STUCK.png` for review. `tests/probe_stuck.mjs` polls the
   live sampler read for one-off diagnosis (uses a debug DOM attr not present in
   ship builds). 20-video confirm: covered=4, recovered=4, stuck=0.
-- **Popup/popunder ad tabs are invisible to element covering** (the mangafreak
-  report): the whole page IS the ad, and every element on it is that site's own
+- **Popup/popunder ad tabs are invisible to element covering** (the aggressive
+  reader-site report): the whole page IS the ad, and every element on it is that site's own
   first-party content. The popup guard works at the TAB level instead —
   content.js reports clicks that didn't ride an `<a href>` (popunder scripts
   hijack clicks on arbitrary page areas; real `target=_blank` links never

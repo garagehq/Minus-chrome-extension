@@ -1,4 +1,4 @@
-// E2E for the popup guard (the mangafreak-class miss): a non-link click that
+// E2E for the popup guard (the reader-site popunder miss): a non-link click that
 // spawns a full-page ad tab gets a cover with Close/Show; a REAL link opening a
 // plain article tab is left alone. Deterministic local fixtures, real engine.
 import { chromium } from "playwright";

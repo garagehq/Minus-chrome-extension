@@ -35,7 +35,8 @@ ctx.on("page", (p) => newPages.push(p));
 
 const pg = await ctx.newPage();
 try {
-  const URL_ = process.argv[2] || "https://ww2.mangafreak.me/Read1_Dandadan_243";
+  const URL_ = process.argv[2];
+  if (!URL_) { log("usage: node tests/probe_popups.mjs <url of a popup-heavy page>"); process.exit(2); }
   await pg.goto(URL_, { waitUntil: "domcontentloaded", timeout: 45000 });
   await pg.bringToFront();
   await sleep(8000);
