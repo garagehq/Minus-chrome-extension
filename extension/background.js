@@ -313,7 +313,7 @@ chrome.tabs.onCreated.addListener((tab) => {
     const armed = !!(click && Math.abs(createdAt - click.ts) <= POPUP_CLICK_WINDOW_MS);
     popupTrace(late ? "created-late" : "created", { opener: tab.openerTabId, armed, ageMs: click ? createdAt - click.ts : -1 });
     if (armed) {
-      popupSuspects.set(tab.id, { openerTabId: tab.openerTabId, anchorHost: click.anchorHost || null, checked: false });
+      popupSuspects.set(tab.id, { openerTabId: tab.openerTabId, anchorHost: click.anchorHost || null, checked: false, tries: 0 });
       if (late) checkPopupSuspect(tab.id); // load/activate events may already be gone
     }
   };
@@ -332,7 +332,7 @@ chrome.tabs.onRemoved.addListener((tabId) => { popupSuspects.delete(tabId); nonL
 
 async function checkPopupSuspect(tabId) {
   const s = popupSuspects.get(tabId);
-  if (!s || s.checked) return;
+  if (!s || s.busy) return;
   const settings = await getSettings();
   if (!settings.enabled || settings.blockPopups === false || isPaused(settings)) { popupSuspects.delete(tabId); return; }
   let tab; try { tab = await chrome.tabs.get(tabId); } catch { popupSuspects.delete(tabId); return; }
@@ -346,20 +346,25 @@ async function checkPopupSuspect(tabId) {
       popupTrace("exempt-same-site", tabDom); popupSuspects.delete(tabId); return; // site opening itself (reader re-open trick) — not the ad tab
     }
   } catch { /* opener gone: keep judging the suspect */ }
-  s.checked = true;
+  s.busy = true;                                  // guard against overlapping re-entry
   await new Promise((r) => setTimeout(r, 1200)); // let the landing paint
   const shot = await captureTab(tab.windowId).catch(() => null);
-  if (!shot) { popupTrace("no-shot", tabId); s.checked = false; return; } // capture raced a nav — retry on next event
+  if (!shot) { popupTrace("no-shot", tabId); s.busy = false; return; } // capture raced a nav — retry on next event
   try {
     await ensureOffscreen();
     const { engineKind } = settings;
     const resp = await askOffscreen({ type: "classify", images: [shot], engineKind });
     const p = resp?.results?.[0]?.p_ad ?? 0;
+    s.tries = (s.tries || 0) + 1;
     (globalThis.__minusPopupVerdicts ||= []).push({ url: (tab.url || "").slice(0, 100), p: +p.toFixed(3) }); // diagnosable
-    popupSuspects.delete(tabId); // one judgment per suspect; "Show page" stays shown
     if (p >= POPUP_GATE) {
+      popupSuspects.delete(tabId);
       chrome.tabs.sendMessage(tabId, { type: "minus:popup-verdict", p_ad: p }).catch(() => {});
       bumpLifetime(1);
+    } else if (s.tries >= 3) {
+      popupSuspects.delete(tabId);               // gave it 3 hops of a redirect chain; it's not an ad landing
+    } else {
+      s.busy = false;                            // low score, maybe a blank redirect hop -> re-judge on the next 'complete'
     }
   } catch { popupSuspects.delete(tabId); }
 }

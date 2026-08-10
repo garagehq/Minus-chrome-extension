@@ -213,20 +213,22 @@
   //    hijack clicks on arbitrary page areas (a manga image, the body), while
   //    legitimate new-tab navigation always goes through an anchor. The
   //    background arms a short window; a tab spawned inside it is a suspect.
-  document.addEventListener("click", (e) => {
+  // Arm the popup guard on a user gesture. Report on BOTH pointerdown and click:
+  // popunder scripts call window.open() from a mousedown/pointerdown handler
+  // (fires BEFORE click), so a click-only signal loses the race with the
+  // tab-created event. Both carry the gesture's anchor destination (null for a
+  // non-link gesture) so the background can still exempt real link navigation.
+  const reportGesture = (e) => {
     try {
-      // report EVERY click, carrying the clicked anchor's declared destination
-      // (null for non-link clicks). Popunder scripts hijack clicks on real
-      // links too (e.g. a reader's next-page anchor) — the background compares
-      // the spawned tab against where the click SAID it was going.
       const path = e.composedPath ? e.composedPath() : [];
       let anchor = path.find((n) => n && n.tagName === "A" && n.href) || e.target?.closest?.("a[href]") || null;
       let anchorHost = null;
-      const viaLink = !!anchor;
-      if (viaLink) { try { anchorHost = new URL(anchor.href).hostname; } catch {} }
+      if (anchor) { try { anchorHost = new URL(anchor.href).hostname; } catch {} }
       sendMsg({ type: "minus:nonlink-click", anchorHost });
-    } catch { /* never break the page's own click handling */ }
-  }, true);
+    } catch { /* never break the page's own event handling */ }
+  };
+  document.addEventListener("pointerdown", reportGesture, true);
+  document.addEventListener("click", reportGesture, true);
 
   // 2) The background judged THIS page to be a popup ad landing: cover it
   //    fully and give an explicit choice. Never auto-close.
