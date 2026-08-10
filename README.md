@@ -32,7 +32,7 @@ The pipeline, end to end:
    tab screenshot for display elements (rate-limited, active tab only), or a
    direct frame read for `<video>`.
 3. **Ask the model.** Crops go to a 450 M-parameter vision-language model —
-   [**Minus-v0.1**](https://huggingface.co/GarageCyril/Minus-v0.1) — running on
+   [**Minus-v0.1**](https://huggingface.co/TheGarageDev/Minus-v0.1) — running on
    your GPU via WebGPU (transformers.js + ONNX Runtime Web, quantized to
    ~430 MB). It answers one question per crop: *"Is this an advertisement?"* —
    and the Yes/No logits give a calibrated `p(ad)`.
@@ -81,7 +81,7 @@ engine picker with per-model decision gates.*
 
 ## The model
 
-The default engine is [**Minus-v0.1** on Hugging Face](https://huggingface.co/GarageCyril/Minus-v0.1)
+The default engine is [**Minus-v0.1** on Hugging Face](https://huggingface.co/TheGarageDev/Minus-v0.1)
 — a fine-tune of [LiquidAI/LFM2.5-VL-450M](https://huggingface.co/LiquidAI/LFM2.5-VL-450M)
 trained over a 28-iteration campaign on streaming-TV captures from the minus
 device plus web display ads and ~10 k mined hard negatives (product photography,
@@ -191,7 +191,7 @@ ads covered at unchanged ~90 % precision**.
 
 | Engine (`key`) | Model | Notes |
 |---|---|---|
-| **`lfm`** (default) | [**Minus v0.1**](https://huggingface.co/GarageCyril/Minus-v0.1) (LFM2.5-VL-450M fine-tune), q4/q8 ONNX (~431 MB) | The open-source shipping model — streaming holdout 99.90/98.06 (best-ever), static-web bench 98.0 % ad recall @ 11 FPs with PR-curve dominance. **WebGPU only.** |
+| **`lfm`** (default) | [**Minus v0.1**](https://huggingface.co/TheGarageDev/Minus-v0.1) (LFM2.5-VL-450M fine-tune), q4/q8 ONNX (~431 MB) | The open-source shipping model — streaming holdout 99.90/98.06 (best-ever), static-web bench 98.0 % ad recall @ 11 FPs with PR-curve dominance. **WebGPU only.** |
 | `lfm-iter27b` | LFM Iter 27b-web | Previous default (v0.3.8, chat-widget/site-header hard negatives + scale-jitter). WebGPU only. |
 | `lfm-iter26` | LFM Iter 26-web | Previous default (v0.3.7, self-promo/UI negatives). WebGPU only. |
 | `lfm-iter27` | LFM Iter 27-web | Candidate superseded by 27b (fixed Botsonic, regressed 9GAG signup). WebGPU only. |
