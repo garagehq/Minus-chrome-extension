@@ -110,6 +110,16 @@
 [data-minus-overlay] .minus-report:hover { background: rgba(0,0,0,0.55); color: #fff; }
 [data-minus-overlay].minus-compact .minus-report { display: none; }
 
+/* Popup-guard full-page cover buttons (Close tab / Show page). The cover itself
+   reuses the flashcard card styling via data-minus-overlay. */
+[data-minus-popup] .minus-popup-btn {
+  background: rgba(10, 16, 24, 0.9); color: #cfe6ff;
+  border: 1px solid #3b82f6; border-radius: 4px;
+  font: 15px/1.6 ui-monospace, monospace; padding: 8px 18px; cursor: pointer;
+}
+[data-minus-popup] .minus-popup-btn:hover { color: #fff; box-shadow: 0 0 10px rgba(59,130,246,0.6); }
+[data-minus-popup] .minus-popup-secondary { border-color: rgba(255,255,255,0.3); }
+
 /* Transient "re-block" chip left in the corner after ✕ reveals an ad, so an
    accidental reveal is one click to undo (auto-fades after a few seconds). */
 [data-minus-undo] {

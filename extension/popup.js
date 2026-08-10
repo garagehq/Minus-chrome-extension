@@ -1,4 +1,4 @@
-const DEFAULTS = { threshold: 0.5, enabled: true, engineKind: "lfm", disabledSites: [], collectOptIn: false, blockVideo: true, blockDisplay: true, pausedUntil: 0 };
+const DEFAULTS = { threshold: 0.5, enabled: true, engineKind: "lfm", disabledSites: [], collectOptIn: false, blockVideo: true, blockDisplay: true, blockPopups: true, pausedUntil: 0 };
 
 let currentHost = "";
 let currentTabId = null;
@@ -115,6 +115,7 @@ async function load() {
   document.getElementById("collect").checked = s.collectOptIn;
   document.getElementById("blockVideo").checked = s.blockVideo;
   document.getElementById("blockDisplay").checked = s.blockDisplay;
+  document.getElementById("blockPopups").checked = s.blockPopups !== false;
   document.getElementById("threshold").value = s.threshold;
   document.getElementById("thVal").textContent = Number(s.threshold).toFixed(2);
   updateTypesWarn();
@@ -182,6 +183,7 @@ async function saveGeneral() {
     collectOptIn: document.getElementById("collect").checked,
     blockVideo: document.getElementById("blockVideo").checked,
     blockDisplay: document.getElementById("blockDisplay").checked,
+    blockPopups: document.getElementById("blockPopups").checked,
     threshold: Math.min(1, Math.max(0, parseFloat(document.getElementById("threshold").value) || DEFAULTS.threshold)),
     engineKind: document.getElementById("engineKind").value,
   });
@@ -197,7 +199,7 @@ async function saveSite() {
   await chrome.storage.local.set({ disabledSites: [...set] });
 }
 
-for (const id of ["enabled", "collect", "blockVideo", "blockDisplay", "threshold", "engineKind"]) {
+for (const id of ["enabled", "collect", "blockVideo", "blockDisplay", "blockPopups", "threshold", "engineKind"]) {
   document.getElementById(id).addEventListener("change", saveGeneral);
 }
 // threshold is a slider: live value readout while dragging, saved continuously

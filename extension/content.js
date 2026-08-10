@@ -162,6 +162,7 @@
     for (const [, div] of overlays) div.remove();
     overlays.clear();
     videoState.clear();
+    document.querySelector("[data-minus-popup]")?.remove(); // popup-guard cover
     reportBlocked();
   }
 
@@ -206,6 +207,64 @@
     }
     reportBlocked();
   });
+
+  // ------------------------------------------------------------- popup guard
+  // 1) Report clicks that did NOT ride a real <a href>: popup/popunder scripts
+  //    hijack clicks on arbitrary page areas (a manga image, the body), while
+  //    legitimate new-tab navigation always goes through an anchor. The
+  //    background arms a short window; a tab spawned inside it is a suspect.
+  document.addEventListener("click", (e) => {
+    try {
+      // report EVERY click, carrying the clicked anchor's declared destination
+      // (null for non-link clicks). Popunder scripts hijack clicks on real
+      // links too (e.g. a reader's next-page anchor) — the background compares
+      // the spawned tab against where the click SAID it was going.
+      const path = e.composedPath ? e.composedPath() : [];
+      let anchor = path.find((n) => n && n.tagName === "A" && n.href) || e.target?.closest?.("a[href]") || null;
+      let anchorHost = null;
+      const viaLink = !!anchor;
+      if (viaLink) { try { anchorHost = new URL(anchor.href).hostname; } catch {} }
+      sendMsg({ type: "minus:nonlink-click", anchorHost });
+    } catch { /* never break the page's own click handling */ }
+  }, true);
+
+  // 2) The background judged THIS page to be a popup ad landing: cover it
+  //    fully and give an explicit choice. Never auto-close.
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg?.type === "minus:popup-verdict" && IS_TOP && enabled) showPopupCover(msg.p_ad);
+  });
+
+  function showPopupCover(pAd) {
+    if (document.querySelector("[data-minus-popup]")) return;
+    const cover = document.createElement("div");
+    cover.setAttribute("data-minus-popup", "");
+    cover.setAttribute("data-minus-overlay", ""); // shared card styling
+    cover.setAttribute("role", "alertdialog");
+    cover.setAttribute("aria-label", "Popup ad blocked by Minus");
+    cover.style.cssText = "position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;";
+    const title = document.createElement("div");
+    title.className = "minus-brand";
+    title.textContent = "minus";
+    const big = document.createElement("div");
+    big.className = "minus-es";
+    big.textContent = "Popup ad blocked";
+    const sub = document.createElement("div");
+    sub.className = "minus-ex";
+    sub.textContent = `This tab opened itself from your click and looks like an ad (${Math.round(pAd * 100)}%).`;
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:10px;margin-top:6px;";
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "minus-popup-btn";
+    closeBtn.textContent = "Close tab";
+    closeBtn.addEventListener("click", () => sendMsg({ type: "minus:close-popup" }));
+    const showBtn = document.createElement("button");
+    showBtn.className = "minus-popup-btn minus-popup-secondary";
+    showBtn.textContent = "Show page";
+    showBtn.addEventListener("click", () => cover.remove());
+    row.append(closeBtn, showBtn);
+    cover.append(title, big, sub, row);
+    document.documentElement.appendChild(cover);
+  }
 
   // Opt-in only: queue a blocked element's crop for contribution. The
   // background holds it for a 10-minute cool-down; clicking X retracts it.

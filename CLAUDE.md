@@ -175,6 +175,19 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
   stuck, and captures `*_STUCK.png` for review. `tests/probe_stuck.mjs` polls the
   live sampler read for one-off diagnosis (uses a debug DOM attr not present in
   ship builds). 20-video confirm: covered=4, recovered=4, stuck=0.
+- **Popup/popunder ad tabs are invisible to element covering** (the mangafreak
+  report): the whole page IS the ad, and every element on it is that site's own
+  first-party content. The popup guard works at the TAB level instead —
+  content.js reports clicks that didn't ride an `<a href>` (popunder scripts
+  hijack clicks on arbitrary page areas; real `target=_blank` links never
+  enter the pipeline), background marks tabs spawned by that opener within 3 s
+  as suspects, and once a suspect is active + loaded + cross-eTLD+1 from its
+  opener it captures the viewport and classifies the PAGE (gate 0.85) → the
+  tab's content script shows a full-page Close-tab/Show-page cover. Same-domain
+  spawns are exempt (the popunder "re-open the reader" trick). Never auto-close.
+  Deterministic fixtures: `popup_opener.html` (localhost) → `ad_landing.html`
+  (127.0.0.1, cross-"domain") + `article.html` negative control
+  (`tests/e2e_popup_guard.mjs`). Live probe: `tests/probe_popups.mjs [url]`.
 - **`pkill -f <pattern>` can match the invoking shell's own command line** and
   SIGTERM your session (exit 144). Kill by exact PID or `pkill -x chrome`.
 - Chrome caches the MV3 SW script in the profile — the harness scrubs
