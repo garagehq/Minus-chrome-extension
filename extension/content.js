@@ -630,6 +630,9 @@
       // user said "show it" -> retract any queued contribution for this element
       const key = sampleKeys.get(el);
       if (key) sendMsg({ type: "minus:retract-sample", key });
+      // reveal is otherwise permanent for this page — leave a transient undo
+      // chip so an accidental ✕ is one click to re-block
+      showUndoChip(el, pAd, div.dataset.minusKind || "display");
     });
     div.querySelector(".minus-report")?.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -650,6 +653,32 @@
       overlays.delete(el);
       reportBlocked();
     });
+  }
+
+  // After ✕ reveals an ad, park a small "re-block" chip on its corner for a few
+  // seconds. Clicking it removes the element from the allow-set and re-covers it
+  // immediately — an accidental reveal no longer needs a page reload to undo.
+  function showUndoChip(el, pAd, kind) {
+    try {
+      const r = el.getBoundingClientRect();
+      const chip = document.createElement("button");
+      chip.setAttribute("data-minus-undo", "");
+      chip.textContent = "↩ re-block";
+      chip.setAttribute("aria-label", "Re-block this ad");
+      chip.style.left = `${r.left + scrollX}px`;
+      chip.style.top = `${r.top + scrollY}px`;
+      chip.style.position = "absolute";
+      const cleanup = () => { clearTimeout(fade); clearTimeout(gone); chip.remove(); };
+      const fade = setTimeout(() => chip.classList.add("minus-undo-fading"), 6000);
+      const gone = setTimeout(cleanup, 8000);
+      chip.addEventListener("click", (e) => {
+        e.stopPropagation();
+        cleanup();
+        allowed.delete(el);
+        if (el.isConnected) block(el, pAd, kind);
+      });
+      document.documentElement.appendChild(chip);
+    } catch { /* never let an undo affordance break the page */ }
   }
 
   function block(el, pAd, kind = "display") {

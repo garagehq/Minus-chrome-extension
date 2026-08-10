@@ -5,7 +5,7 @@
 // block-action configuration (overlay style, flashcard language, confidence tag).
 const DEFAULTS = {
   enabled: true, blockVideo: true, blockDisplay: true, collectOptIn: false,
-  engineKind: "lfm", disabledSites: [],
+  engineKind: "lfm", disabledSites: [], threshold: 0.5,
   blockAction: "flashcards", blockLang: "es", showConfidence: true,
 };
 
@@ -73,7 +73,14 @@ async function refreshEngineStatus() {
   else if (info.state === "loading") el.textContent = `downloading model… ${Math.round((info.progress || 0) * 100)}%`;
   else if (info.state === "off") el.textContent = "blocking off — model unloaded";
   else if (info.state === "error") el.textContent = `engine error: ${String(info.error).slice(0, 120)}`;
+  else if (info.state === "cold") el.textContent = "engine idle — starts on next scan";
   else el.textContent = `engine: ${info.state}`;
+}
+
+// Same both-types-off warning as the popup: the master toggle looks "on" while
+// blocking is effectively disabled.
+function updateTypesWarn() {
+  $("typesWarn").style.display = (!$("blockVideo").checked && !$("blockDisplay").checked) ? "block" : "none";
 }
 
 // ---- wire-up ------------------------------------------------------------------
@@ -85,6 +92,9 @@ async function load() {
   $("collect").checked = s.collectOptIn;
   $("showConfidence").checked = s.showConfidence;
   ($("actMinimal").checked = s.blockAction === "minimal") || ($("actFlash").checked = true);
+  $("threshold").value = s.threshold;
+  $("thVal").textContent = Number(s.threshold).toFixed(2);
+  updateTypesWarn();
   $("disabledSites").value = (s.disabledSites || []).join("\n");
   $("ver").textContent = "Minus v" + chrome.runtime.getManifest().version;
 
@@ -109,9 +119,15 @@ for (const id of ["enabled", "blockDisplay", "blockVideo", "collect", "showConfi
   $(id).addEventListener("change", async () => {
     const key = id === "collect" ? "collectOptIn" : id;
     await set({ [key]: $(id).checked });
+    if (id === "blockVideo" || id === "blockDisplay") updateTypesWarn();
     renderPreview(await current());
   });
 }
+$("threshold").addEventListener("input", async () => {
+  const v = Math.min(1, Math.max(0, parseFloat($("threshold").value) || 0.5));
+  $("thVal").textContent = v.toFixed(2);
+  await set({ threshold: v });
+});
 for (const id of ["actFlash", "actMinimal"]) {
   $(id).addEventListener("change", async () => {
     await set({ blockAction: $("actMinimal").checked ? "minimal" : "flashcards" });
@@ -148,8 +164,21 @@ async function refreshLearnStats() {
   } catch { /* storage unavailable */ }
 }
 $("openReview").addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL("review.html") }));
+// Destructive reset uses an inline armed two-step (click once to arm, again to
+// confirm; auto-disarms) instead of a jarring native confirm() dialog.
+let resetArmTimer = null;
 $("resetLearn").addEventListener("click", async () => {
-  if (!confirm("Reset all flashcard progress? The words you've seen and their review schedule will be cleared.")) return;
+  const btn = $("resetLearn");
+  if (!btn.classList.contains("armed")) {
+    btn.classList.add("armed");
+    btn.textContent = "Really reset? Click again";
+    clearTimeout(resetArmTimer);
+    resetArmTimer = setTimeout(() => { btn.classList.remove("armed"); btn.textContent = "Reset progress"; }, 5000);
+    return;
+  }
+  clearTimeout(resetArmTimer);
+  btn.classList.remove("armed");
+  btn.textContent = "Reset progress";
   await chrome.storage.local.set({ [MINUS_LEARN_KEY]: { v: 1, cards: {} } });
   await refreshLearnStats();
   savedFlash("learning progress reset");

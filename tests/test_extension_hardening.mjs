@@ -68,6 +68,28 @@ ok("background schedules an auto-resume alarm", /minus-resume/.test(bg));
 ok("popup has pause + resume controls", /class="pausebtn"/.test(readFileSync(join(EXT,"popup.html"),"utf8")) && /pausedUntil: Date\.now\(\)/.test(readFileSync(join(EXT,"popup.js"),"utf8")));
 ok("content reacts to pausedUntil", /"pausedUntil" in changes/.test(content));
 
+// --- UX-audit fixes (v0.4.5) ---
+{
+  const css = readFileSync(join(EXT, "overlay.css"), "utf8");
+  ok("✕ reveal is faintly visible at rest (not hover-only)", /\.minus-x\s*{[^}]*opacity:\s*0\.\d+/s.test(css));
+  ok("⚑ report is faintly visible at rest", /\.minus-report\s*{[^}]*opacity:\s*0\.\d+/s.test(css));
+  ok("undo chip styled + fade class", /data-minus-undo/.test(css) && /minus-undo-fading/.test(css));
+  ok("content shows an undo chip after ✕ reveal", /showUndoChip/.test(content) && /allowed\.delete\(el\)/.test(content));
+  const popupHtml = readFileSync(join(EXT, "popup.html"), "utf8");
+  const popupJs = readFileSync(join(EXT, "popup.js"), "utf8");
+  ok("popup threshold is a clamped slider with live readout", /type="range" id="threshold"/.test(popupHtml) && /thVal/.test(popupJs));
+  ok("popup warns when both ad types are off", /typesWarn/.test(popupHtml) && /updateTypesWarn/.test(popupJs));
+  ok("popup gives engine-switch feedback", /new engine loads on the next scan/.test(popupJs));
+  ok("popup maps the internal 'cold' state to plain language", /cold/.test(popupJs) && /starts on next scan/.test(popupJs));
+  const optHtml = readFileSync(join(EXT, "options.html"), "utf8");
+  const optJs = readFileSync(join(EXT, "options.js"), "utf8");
+  ok("options has the threshold slider too (popup parity)", /type="range" id="threshold"/.test(optHtml));
+  ok("options reset uses an inline armed confirm, not confirm()", /armed/.test(optJs) && !/confirm\("/.test(optJs));
+  ok("options has the both-off warning", /typesWarn/.test(optHtml) && /updateTypesWarn/.test(optJs));
+  const reviewJs = readFileSync(join(EXT, "review.js"), "utf8");
+  ok("review TO-REVIEW stat counts down (not stale)", /queue\.length - idx/.test(reviewJs));
+}
+
 // --- false-positive reporting ---
 ok("background handles a user false-positive report", /minus:report-fp/.test(bg) && /user_fp/.test(bg) || /queuedAt: 0/.test(bg));
 ok("content sends a user_fp report with the crop", /minus:report-fp/.test(content) && /verdict: "user_fp"/.test(content));

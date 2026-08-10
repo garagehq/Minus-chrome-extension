@@ -33,6 +33,9 @@
     h2 { font-size: 22px; margin: 0 0 4px; color: #7fb0e6; letter-spacing: 0.08em;
       text-transform: uppercase; font-weight: normal; }
     .hint { color: var(--muted); font-size: 16px; margin: 0 0 14px; }
+    .warn { font-size: 16px; color: #f0b866; padding: 2px 0 6px; letter-spacing: 0.03em; }
+    #thVal { color: var(--ink); }
+    .btn.armed { border-color: #e06f7f; color: #ffd9de; }
 
     .learnstats { display: flex; gap: 10px; margin: 4px 0 16px; flex-wrap: wrap; }
     .learnstats > span { flex: 1; min-width: 92px; background: var(--panel); border: 1px solid var(--line);
@@ -116,6 +119,10 @@
         <label class="toggle-switch"><input type="checkbox" id="blockVideo"><span class="toggle-slider"></span></label>
         <label for="blockVideo" class="rl">Block video ads</label>
       </div>
+      <div class="warn" id="typesWarn" style="display:none">⚠ both ad types are off — nothing will be blocked</div>
+      <label class="field" for="threshold">Ad threshold — <span id="thVal">0.50</span></label>
+      <input type="range" id="threshold" min="0" max="1" step="0.05">
+      <p class="hint" style="margin-top:4px">Minimum model confidence before a video/iframe is covered. Lower = more aggressive.</p>
     </section>
 
     <section>

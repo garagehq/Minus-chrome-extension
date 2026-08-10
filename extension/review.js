@@ -18,7 +18,9 @@ function renderStats() {
   $("sSeen").textContent = s.seen;
   $("sLearning").textContent = s.learning;
   $("sLearned").textContent = s.learned;
-  $("sDue").textContent = queue.length; // cards actually queued this session
+  // remaining in THIS session, so it counts down to 0 as you grade (a static
+  // queue length reads as stale next to the "All caught up" done screen)
+  $("sDue").textContent = Math.max(0, queue.length - idx);
 }
 
 // Fill the language filter with "All" + only the languages the user has seen.
@@ -86,6 +88,7 @@ function finishSession() {
   $("session").classList.add("hidden");
   $("done").classList.remove("hidden");
   $("progress").textContent = "";
+  renderStats(); // sync the stat strip (TO REVIEW → 0) with the done screen
   const s = minusLearnStats(store, Date.now(), lang);
   if (s.seen === 0) {
     $("doneBig").textContent = "No words yet";

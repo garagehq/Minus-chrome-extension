@@ -65,9 +65,27 @@ async function refreshStatus() {
     bar.style.display = "none";
   } else if (info.state === "error") {
     el.textContent = `engine error: ${String(info.error).slice(0, 120)}`;
+  } else if (info.state === "cold") {
+    // internal state name; say what it means instead of leaking dev jargon
+    el.textContent = "engine idle — starts on next scan";
   } else {
     el.textContent = `engine: ${info.state}`;
   }
+}
+
+// Amber warning when the master toggle is on but both ad types are off — the
+// controls otherwise look "on" while blocking is effectively disabled.
+function updateTypesWarn() {
+  const bothOff = !document.getElementById("blockVideo").checked && !document.getElementById("blockDisplay").checked;
+  document.getElementById("typesWarn").style.display = bothOff ? "block" : "none";
+}
+
+let flashTimer = null;
+function flash(msg) {
+  const el = document.getElementById("flash");
+  el.textContent = msg;
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { el.textContent = ""; }, 4000);
 }
 
 // Populate the engine dropdown from the generated catalog so newly-packaged
@@ -98,6 +116,8 @@ async function load() {
   document.getElementById("blockVideo").checked = s.blockVideo;
   document.getElementById("blockDisplay").checked = s.blockDisplay;
   document.getElementById("threshold").value = s.threshold;
+  document.getElementById("thVal").textContent = Number(s.threshold).toFixed(2);
+  updateTypesWarn();
   await loadEngineOptions();
   document.getElementById("engineKind").value = s.engineKind;
 
@@ -113,7 +133,8 @@ async function load() {
   } else {
     site.checked = false;
     site.disabled = true;
-    siteLabel.textContent = "Block on this site (n/a)";
+    siteLabel.textContent = "Block on this site (unavailable here)";
+    siteLabel.title = "Only regular web pages (http/https) can be scanned — this page type has no ads to block.";
   }
 
   document.getElementById("ver").textContent = "v" + chrome.runtime.getManifest().version;
@@ -179,6 +200,18 @@ async function saveSite() {
 for (const id of ["enabled", "collect", "blockVideo", "blockDisplay", "threshold", "engineKind"]) {
   document.getElementById(id).addEventListener("change", saveGeneral);
 }
+// threshold is a slider: live value readout while dragging, saved continuously
+document.getElementById("threshold").addEventListener("input", () => {
+  document.getElementById("thVal").textContent = Number(document.getElementById("threshold").value).toFixed(2);
+  saveGeneral();
+});
+for (const id of ["blockVideo", "blockDisplay"]) {
+  document.getElementById(id).addEventListener("change", updateTypesWarn);
+}
+// switching engines is a heavyweight, deferred action — say so explicitly
+document.getElementById("engineKind").addEventListener("change", () => {
+  flash("✓ saved — new engine loads on the next scan");
+});
 document.getElementById("siteEnabled").addEventListener("change", saveSite);
 document.getElementById("optionsLink").addEventListener("click", (e) => {
   e.preventDefault();

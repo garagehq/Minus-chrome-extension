@@ -3,8 +3,9 @@
 The browser cousin of the [minus](https://github.com/garagehq/minus) HDMI
 device: instead of matching filter lists, it **looks** at page elements with a
 vision model running **entirely inside your browser** and covers the ones that
-are ads with Spanish flashcards. Hover an overlay and hit ✕ to reveal the ad if
-you actually wanted it.
+are ads with Spanish flashcards. Every card shows a faint ✕ — click it to
+reveal the ad if you actually wanted it (a transient **↩ re-block** chip lets
+you undo an accidental reveal).
 
 Nothing leaves your machine — no server, no filter-list subscriptions, no
 telemetry. The model *sees* what you see.
@@ -40,7 +41,9 @@ The quick panel:
   live, no reload).
 - **📚 Review flashcards** — opens the review page; the button shows how many
   cards are due so the words you meet on ads don't just flash by (see below).
-- **Ad threshold**, **Engine** picker, live engine status.
+- **Ad threshold slider** (live value, can't hold junk), **Engine** picker with
+  switch feedback, live engine status. A warning appears if you switch both ad
+  types off while the master toggle is still on.
 - **Contribute anonymous ad snapshots** — opt-in, off by default (see Privacy).
   When it's on, each overlay gets a **⚑ not an ad** button (revealed on hover /
   focus) to report a false positive so the snapshot is flagged for review.
@@ -74,7 +77,8 @@ A full-page superset of the popup, plus settings that only live here:
   - Changes apply to overlays already on screen — no reload.
 - **Disabled-sites list** — edit the per-site blocking list as text (the
   popup's per-site toggle writes the same list).
-- **Engine picker** with each model's decision gates, live engine status.
+- **Ad threshold slider** (same setting as the popup) and the **Engine picker**
+  with each model's decision gates, live engine status.
 
 ## Engines
 

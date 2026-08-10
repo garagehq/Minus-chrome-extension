@@ -179,7 +179,11 @@ await videoUnblockCase("swap-to-content", (pg) => pg.evaluate(() => window.__vad
 console.log("\n=== Phase 2.5: turning blocking OFF removes overlays live ===");
 {
   const pg = await ctx.newPage();
-  await pg.goto("https://www.forbes.com/", { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+  // Deterministic local display-ad fixture. This phase previously loaded live
+  // forbes.com and silently depended on a third-party actually SERVING a
+  // coverable ad — which this datacenter IP often doesn't get, so the phase
+  // flaked on ad delivery, not on the disable-teardown logic under test.
+  await pg.goto(`http://127.0.0.1:${FPORT}/`, { waitUntil: "domcontentloaded" }).catch(() => {});
   await pg.bringToFront();
   let covered = false;
   for (let i = 0; i < 18; i++) { if ((await overlayCount(pg)) > 0) { covered = true; break; } await pg.waitForTimeout(2500); }
@@ -257,7 +261,8 @@ const capAfter = await capCounters();
 const engFinal = await engineState();
 // The extension-implicating edge cases — the ones that are OUR bug, not a flaky site.
 const extBugs = edgeCases.filter((e) => ["unexpected-error", "page-crash", "pageerror", "overlay-storm", "capture-stall"].includes(e.kind));
-ok("active tab actually captured across the soak", (capAfter.ok - capBefore.ok) > 20, `only ${capAfter.ok - capBefore.ok} captures`);
+// floor scales with run size (some sites legitimately produce no candidates)
+ok("active tab actually captured across the soak", (capAfter.ok - capBefore.ok) >= Math.min(20, Math.ceil(sites.length / 2)), `only ${capAfter.ok - capBefore.ok} captures over ${sites.length} sites`);
 ok("engine RECOVERED to ready by the end (device-loss self-heal)", engFinal === "ready", `final=${engFinal}, drops=${notReady}`);
 ok("no extension-implicating edge cases (crash/pageerror/stall/storm)", extBugs.length === 0, `${extBugs.length}: ${JSON.stringify(extBugs.slice(0, 8))}`);
 ok("soak completed without harness crash", visited >= sites.length * 0.6, `only ${visited}/${sites.length} visited`);
