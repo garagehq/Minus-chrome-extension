@@ -18,7 +18,13 @@
   // Boundary = any non-alphanumeric (so "ad-slot", "slot-ad", "box ad", "/ad/"
   // all match, but "gradient"/"shadow"/"download" don't). The old [-_\b] set
   // excluded whitespace, so an id ending in "-ad" (e.g. "shadow-ad") missed.
-  const AD_HINT = /(^|[^a-z0-9])(ad|ads|advert|advertisement|adsense|sponsor|sponsored|promo|banner|dbl|doubleclick|taboola|outbrain)([^a-z0-9]|$)/i;
+  // Tokens that mark an ad slot. Includes the major NATIVE-ad networks (Taboola,
+  // Outbrain, MGID, RevContent, Zergnet, Dianomi, Sharethrough, Nativo, AdBlade,
+  // Plista) so native/"chum-box" units route to the ad-context gate instead of
+  // being dropped by the shape filter (soak finding: native ads are pixel/shape-
+  // identical to editorial thumbnails). These are network-specific identifiers,
+  // not generic words like "recommended", so they won't match editorial widgets.
+  const AD_HINT = /(^|[^a-z0-9])(ad|ads|advert|advertisement|adsense|sponsor|sponsored|promo|banner|dbl|doubleclick|taboola|outbrain|mgid|revcontent|zergnet|dianomi|sharethrough|nativo|adblade|plista|adnow)([^a-z0-9]|$)/i;
   // Shape gates so we only ever crop a *single ad slot*, never a content
   // column / hero / page section. Standard IAB units fit inside these; the
   // failure mode was giant containers (e.g. 710×3555 article grids) whose
@@ -512,9 +518,9 @@
         //    and the model FPs on them confidently — shape is the only signal).
         const rc = el.getBoundingClientRect();
         let isAd;
-        if (ctx) isAd = r.p_ad >= CTX_BLOCK_P;
-        else if (isStandardAdSize(rc.width, rc.height) && !isSquarish(rc.width, rc.height)) isAd = r.p_ad >= BARE_BLOCK_P;
-        else isAd = false;                                  // bare + non-rectangular-standard: editorial photos / product tiles live here
+        if (ctx) { isAd = r.p_ad >= CTX_BLOCK_P; }
+        else if (isStandardAdSize(rc.width, rc.height) && !isSquarish(rc.width, rc.height)) { isAd = r.p_ad >= BARE_BLOCK_P; }
+        else { isAd = false; }  // editorial photos / product tiles — the model FPs here; shape is the only signal
         verdictCache.set(sig, isAd);
         if (verdictCache.size > 500) verdictCache.delete(verdictCache.keys().next().value);
         if (isAd) {
