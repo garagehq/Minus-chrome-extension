@@ -2,6 +2,12 @@
 # Sequential full suite. Each test closes its own fixture server in finally;
 # running strictly one-at-a-time is enough to avoid port collisions.
 set +e
+# GPU recovery regressions (require a working WebGPU device — DISPLAY=:99 on Tegra).
+for t in test_device_loss_recovery test_gpu_death_spiral; do
+  echo "===== $t"
+  node tests/$t.mjs 2>&1 | grep -E "PASS|FAIL|green|failure|exception"
+  sleep 4
+done
 for t in test_video_hysteresis test_edge_cases test_collection_optin; do
   echo "===== $t"
   node tests/$t.mjs 2>&1 | grep -E "PASS|FAIL|green|failure|exception"

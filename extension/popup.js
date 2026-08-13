@@ -65,6 +65,11 @@ async function refreshStatus() {
     bar.style.display = "none";
   } else if (info.state === "error") {
     el.textContent = `engine error: ${String(info.error).slice(0, 120)}`;
+  } else if (info.state === "degraded") {
+    // GPU busy / device lost under pressure — paused, auto-retries when it frees up
+    const secs = Math.max(1, Math.ceil((info.retryInMs || 0) / 1000));
+    el.textContent = `paused — GPU busy, retrying in ${secs}s`;
+    bar.style.display = "none";
   } else if (info.state === "cold") {
     // internal state name; say what it means instead of leaking dev jargon
     el.textContent = "engine idle — starts on next scan";

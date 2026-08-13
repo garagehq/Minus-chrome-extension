@@ -112,17 +112,52 @@ async function localModelAvailable(dir) {
 // ORT's "Failed to get GPU adapter" throw. Retries cover a GPU service that's
 // still spinning up (seen on NVIDIA Tegra).
 async function warmUpWebGpu(tries = 5, delayMs = 1200) {
-  if (!navigator.gpu) return false;
+  return (await probeWebGpu(tries, delayMs)) === "ok";
+}
+
+// Richer WebGPU probe for the WebGPU-only LFM loader. Distinguishes:
+//   "no-webgpu" — navigator.gpu absent: WebGPU is truly off (permanent; the
+//                 loader surfaces the actionable "enable it in chrome://flags").
+//   "no-device" — adapter/device can't be obtained right now: a transient
+//                 GPU-process restart or memory-pressure device loss. RETRYABLE
+//                 — the caller backs off and retries instead of falling through
+//                 to a doomed WASM build (this model has no WASM path).
+//   "ok"        — a fresh device was obtained (and immediately released).
+async function probeWebGpu(tries = 5, delayMs = 1200) {
+  if (!navigator.gpu) return "no-webgpu";
   for (let i = 0; i < tries; i++) {
     try {
       const adapter = await navigator.gpu.requestAdapter();
       const device = adapter && await adapter.requestDevice();
-      if (device) { device.destroy?.(); return true; }
+      if (device) { device.destroy?.(); return "ok"; }
     } catch {}
     await new Promise((r) => setTimeout(r, delayMs));
   }
-  return false;
+  return "no-device";
 }
+
+// WebGPU-only recovery — the death-spiral fix. The default LFM decoder uses
+// GatherBlockQuantized, which ORT-web's WASM backend cannot run, so there is NO
+// WASM fallback. When the GPU device is lost under pressure, rebuilding the
+// (~150s) model on a still-busy GPU just thrashes and blocks nothing. Instead,
+// on a GPU-class load failure we enter a "degraded" cooldown: classify calls
+// fast-fail (content.js reschedules the scan rather than hanging, and never
+// caches a false "not an ad"), and the expensive rebuild is only re-attempted
+// once the cooldown elapses — by which point a transient device loss has usually
+// cleared. Backoff grows 5s→60s per consecutive failure and resets on the first
+// successful build. A genuinely no-WebGPU machine stays a permanent "error".
+class GpuUnavailableError extends Error {}
+const GPU_BACKOFF_BASE_MS = 5000;
+const GPU_BACKOFF_MAX_MS = 60000;
+let gpuBackoffUntil = 0;
+let gpuBackoffAttempts = 0;
+function enterGpuBackoff() {
+  gpuBackoffAttempts++;
+  const delay = Math.min(GPU_BACKOFF_MAX_MS, GPU_BACKOFF_BASE_MS * 2 ** (gpuBackoffAttempts - 1));
+  gpuBackoffUntil = Date.now() + delay;
+  return delay;
+}
+function clearGpuBackoff() { gpuBackoffAttempts = 0; gpuBackoffUntil = 0; }
 
 
 // Reject if `promise` doesn't settle within `ms`. Used to bound WebGPU model
@@ -150,7 +185,14 @@ async function loadEngine(entry) {
 
   // Validated combo (parity vs PyTorch: ad 0.999 / non-ad 0.031): 431MB total.
   const dtype = { vision_encoder: "q8", embed_tokens: "q8", decoder_model_merged: "q4" };
-  let device = (await warmUpWebGpu()) ? "webgpu" : "wasm";
+  // WebGPU-only model: a transient missing device must NOT fall through to a
+  // WASM build that's guaranteed to fail (GatherBlockQuantized) — throw a
+  // retryable error so getEngine backs off and rebuilds when the GPU frees up.
+  // Only a true no-WebGPU machine ("no-webgpu") takes the WASM path, where the
+  // failure is turned into the actionable "enable WebGPU" error.
+  const probe = await probeWebGpu();
+  if (probe === "no-device") throw new GpuUnavailableError("WebGPU device temporarily unavailable");
+  let device = probe === "ok" ? "webgpu" : "wasm";
   engineInfo = { state: "loading", modelId, device };
 
   // aggregate download/load progress for the popup (file -> fraction)
@@ -203,15 +245,15 @@ async function loadEngine(entry) {
   try {
     await withTimeout(warmUp(engine), 60000, `${device} warm-up`);
   } catch (e) {
-    if (device !== "wasm") {
-      console.info(`[minus] ${device} inference failed; rebuilding on WASM.`); // no error obj
-      device = "wasm";
-      engineInfo = { ...engineInfo, device, state: "loading" };
-      engine.model = await buildModel("wasm");
-      try { await withTimeout(warmUp(engine), 60000, "wasm warm-up"); } catch (e2) { console.warn("[minus] WASM warm-up failed (continuing):", e2); }
-    } else {
-      console.warn("[minus] WASM warm-up failed (continuing):", e);
+    if (device === "webgpu") {
+      // The GPU device died during warm-up (pressure hit mid-load). There's no
+      // WASM fallback for this model, so surface it as retryable — getEngine
+      // enters backoff and a later scan rebuilds once the GPU frees up. Dispose
+      // the half-built model so its device tears down before the next attempt.
+      try { engine.model?.dispose?.(); } catch {}
+      throw new GpuUnavailableError(`WebGPU warm-up failed: ${String(e).slice(0, 120)}`);
     }
+    console.warn("[minus] WASM warm-up failed (continuing):", e);
   }
 
   engineInfo = { state: "ready", modelId, device };
@@ -342,7 +384,21 @@ async function rebuildEngine(deadEngine, engineKind) {
 async function getEngine(engineKind = "lfm") {
   const catalog = await getCatalog();
   const entry = resolveModel(catalog, engineKind);
-  if (enginePromise && loadedEngineKey !== entry.key) {
+  const isSwitch = enginePromise && loadedEngineKey !== entry.key;
+  // A manual engine switch is a fresh intent — clear any GPU backoff so the newly
+  // selected engine gets a clean first attempt instead of inheriting the cooldown.
+  if (isSwitch) clearGpuBackoff();
+  // GPU backoff gate: while cooling down (and no live engine), fast-fail instead
+  // of launching another expensive rebuild on a still-busy GPU. classify turns
+  // this into a quick ok:false and content.js reschedules the scan — nothing is
+  // cached as "not an ad", and the engine recovers on a later attempt once the
+  // cooldown elapses.
+  if (!enginePromise && gpuBackoffUntil && Date.now() < gpuBackoffUntil) {
+    const wait = gpuBackoffUntil - Date.now();
+    engineInfo = { state: "degraded", reason: "gpu-busy", retryInMs: wait };
+    throw new GpuUnavailableError(`GPU recovering; retry in ${Math.ceil(wait / 1000)}s`);
+  }
+  if (isSwitch) {
     // Engine switch: dispose the previous device before creating the new one.
     disposeOld(enginePromise);
     enginePromise = null;
@@ -367,20 +423,30 @@ async function getEngine(engineKind = "lfm") {
         new Promise((_, rej) => setTimeout(() => rej(new Error("engine load timeout")), 90000)),
       ]);
     })()
+      .then((eng) => { clearGpuBackoff(); return eng; })   // built successfully — healthy again
       .catch((e) => {
         enginePromise = null;
         loadedEngineKey = null;
+        const s = String(e);
         // The quantized LFM model uses GatherBlockQuantized, which ORT's WASM
         // backend can't run — so on a machine without working WebGPU the session
-        // fails to create. Turn that cryptic ORT error into clear guidance.
-        const s = String(e);
+        // fails to create. That's a PERMANENT, actionable error.
         const needsGpu = /GatherBlockQuantized|Could not find an implementation|Can't create a session/i.test(s);
-        engineInfo = {
-          state: "error",
-          error: needsGpu
-            ? "This engine needs WebGPU, which isn't available. Enable it in your browser (chrome://flags → “Unsafe WebGPU”) and reload."
-            : s,
-        };
+        // A transient GPU failure (device lost, warm-up died, load timed out) is
+        // RECOVERABLE — back off and report "degraded" rather than a dead engine,
+        // so a later scan rebuilds once the GPU frees up (the death-spiral fix).
+        const retryable = !needsGpu && (e instanceof GpuUnavailableError || isFatalGpuError(e) || /engine load timeout/i.test(s));
+        if (retryable) {
+          const delay = enterGpuBackoff();
+          engineInfo = { state: "degraded", reason: "gpu-busy", retryInMs: delay };
+        } else {
+          engineInfo = {
+            state: "error",
+            error: needsGpu
+              ? "This engine needs WebGPU, which isn't available. Enable it in your browser (chrome://flags → “Unsafe WebGPU”) and reload."
+              : s,
+          };
+        }
         throw e;
       });
   }
