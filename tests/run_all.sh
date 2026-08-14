@@ -3,7 +3,7 @@
 # running strictly one-at-a-time is enough to avoid port collisions.
 set +e
 # GPU recovery regressions (require a working WebGPU device — DISPLAY=:99 on Tegra).
-for t in test_device_loss_recovery test_gpu_death_spiral; do
+for t in test_device_loss_recovery test_gpu_death_spiral test_engine_recreate; do
   echo "===== $t"
   node tests/$t.mjs 2>&1 | grep -E "PASS|FAIL|green|failure|exception"
   sleep 4

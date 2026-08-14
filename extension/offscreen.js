@@ -157,7 +157,34 @@ function enterGpuBackoff() {
   gpuBackoffUntil = Date.now() + delay;
   return delay;
 }
-function clearGpuBackoff() { gpuBackoffAttempts = 0; gpuBackoffUntil = 0; }
+function clearGpuBackoff() { gpuBackoffAttempts = 0; gpuBackoffUntil = 0; degradedSince = 0; }
+
+// A REAL device loss (vs the synthetic one the unit test forces) can't be
+// recovered in place: on some platforms the lost WebGPU device never returns
+// inside the SAME offscreen document, so probeWebGpu keeps failing and the
+// in-place backoff loop can degrade forever (soak finding, 2026-08-14: engine
+// stayed "degraded" for 13+ polls after a tmz.com device loss, even on light
+// pages). The only reliable recovery is to RECREATE the offscreen document — a
+// fresh one gets a new GPU context — but a document can't respawn itself, so we
+// ask the background worker to do it. degradedSince tracks how long we've been
+// continuously degraded; once that exceeds STUCK_AFTER_MS (in-place retry has
+// demonstrably failed, not a brief transient), we signal. Rate-limited so a
+// genuinely dead GPU can't thrash document recreation.
+let degradedSince = 0;
+let lastStuckSignal = 0;
+const STUCK_AFTER_MS = 25000;
+const STUCK_SIGNAL_INTERVAL_MS = 60000;
+function markDegraded(retryInMs) {
+  engineInfo = { state: "degraded", reason: "gpu-busy", retryInMs };
+  if (!degradedSince) degradedSince = Date.now();
+}
+function maybeSignalStuck() {
+  if (!degradedSince) return;
+  if (Date.now() - degradedSince < STUCK_AFTER_MS) return;
+  if (Date.now() - lastStuckSignal < STUCK_SIGNAL_INTERVAL_MS) return;
+  lastStuckSignal = Date.now();
+  try { chrome.runtime.sendMessage({ target: "minus-background", type: "minus:engine-stuck", stuckMs: Date.now() - degradedSince }); } catch {}
+}
 
 
 // Reject if `promise` doesn't settle within `ms`. Used to bound WebGPU model
@@ -249,7 +276,9 @@ async function loadEngine(entry) {
       // The GPU device died during warm-up (pressure hit mid-load). There's no
       // WASM fallback for this model, so surface it as retryable — getEngine
       // enters backoff and a later scan rebuilds once the GPU frees up. Dispose
-      // the half-built model so its device tears down before the next attempt.
+      // the half-built model (fire-and-forget — see disposeOld on why we don't
+      // await: awaiting the teardown contends on the shared device and slows
+      // recovery).
       try { engine.model?.dispose?.(); } catch {}
       throw new GpuUnavailableError(`WebGPU warm-up failed: ${String(e).slice(0, 120)}`);
     }
@@ -355,6 +384,15 @@ function isFatalGpuError(e) {
 // stash the disposal promise and make getEngine await it before rebuilding.
 let disposalDone = null;
 function disposeOld(old) {
+  // model.dispose() releases this engine's sessions' GPU buffers. We deliberately
+  // FIRE-AND-FORGET it rather than awaiting: ORT-web keeps ONE shared global
+  // device (ort.env.webgpu.device) reused across sessions, so there's no device
+  // handle to leak — only per-session buffers, which the browser reclaims. An
+  // experiment that awaited the (async) dispose REGRESSED recovery: awaiting a
+  // heavy GPU teardown right before probing for a new device contends on that
+  // single shared device (the Tegra device-teardown race), so probeWebGpu returns
+  // "no-device", backoff grows, and recovery blows past its window. The 250ms
+  // settle below is the intentional, sufficient teardown gap.
   disposalDone = Promise.resolve(old)
     .then((eng) => { try { eng?.model?.dispose?.(); } catch {} })
     .catch(() => {})
@@ -395,7 +433,7 @@ async function getEngine(engineKind = "lfm") {
   // cooldown elapses.
   if (!enginePromise && gpuBackoffUntil && Date.now() < gpuBackoffUntil) {
     const wait = gpuBackoffUntil - Date.now();
-    engineInfo = { state: "degraded", reason: "gpu-busy", retryInMs: wait };
+    markDegraded(wait);
     throw new GpuUnavailableError(`GPU recovering; retry in ${Math.ceil(wait / 1000)}s`);
   }
   if (isSwitch) {
@@ -438,7 +476,7 @@ async function getEngine(engineKind = "lfm") {
         const retryable = !needsGpu && (e instanceof GpuUnavailableError || isFatalGpuError(e) || /engine load timeout/i.test(s));
         if (retryable) {
           const delay = enterGpuBackoff();
-          engineInfo = { state: "degraded", reason: "gpu-busy", retryInMs: delay };
+          markDegraded(delay);
         } else {
           engineInfo = {
             state: "error",
@@ -533,6 +571,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     } catch (e) {
       sendResponse({ ok: false, error: String(e) });
     }
+    // Heartbeat: every classify/status is a chance to notice we've been stuck
+    // "degraded" too long (real device loss) and ask background to recreate us.
+    maybeSignalStuck();
   })();
   return true;
 });

@@ -402,6 +402,28 @@ async function closeOffscreen() {
   offscreenReady = null;
 }
 
+// The offscreen engine signals "minus:engine-stuck" when it has been GPU-degraded
+// too long to recover in place — a REAL device loss, where the WebGPU device never
+// returns inside the SAME offscreen document (soak finding, 2026-08-14). The only
+// reliable recovery is to recreate the document: a fresh one gets a NEW GPU
+// context. Rate-limited so a genuinely dead GPU can't thrash recreation, and never
+// resurrects a document the user has disabled/paused.
+let lastEngineReload = 0;
+const ENGINE_RELOAD_MIN_INTERVAL_MS = 45000;
+async function reloadOffscreenEngine(reason) {
+  const now = Date.now();
+  if (now - lastEngineReload < ENGINE_RELOAD_MIN_INTERVAL_MS) return false;
+  const s = await getSettings().catch(() => ({}));
+  if (s.enabled === false || isPaused(s)) return false;
+  lastEngineReload = now;
+  console.warn(`[minus] engine stuck (${reason}) — recreating offscreen document for a fresh GPU context`);
+  await closeOffscreen();
+  await ensureOffscreen();
+  // warm the fresh context so it's ready before the next scan
+  askOffscreen({ type: "engine-status", engineKind: s.engineKind }).catch(() => {});
+  return true;
+}
+
 // "Block ads (all sites)" OFF -> unload the model entirely; back ON -> warm it
 // up again so the first page doesn't eat the whole cold-start.
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -535,7 +557,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.target === "minus-offscreen") return; // not for us
   (async () => {
     try {
-      if (msg.type === "minus:capture") {
+      if (msg.type === "minus:engine-stuck") {
+        // offscreen engine can't recover a real device loss in place — recreate it
+        await reloadOffscreenEngine(`degraded ${Math.round((msg.stuckMs || 0) / 1000)}s`);
+        sendResponse({ ok: true });
+      } else if (msg.type === "minus:capture") {
         // captureVisibleTab ALWAYS returns the active tab's pixels for the
         // window. A background/inactive tab that captured would crop its own
         // element coordinates against the wrong image — mis-scaled overlays and
