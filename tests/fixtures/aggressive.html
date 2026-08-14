@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>aggressive-mode fixture</title>
+<style>body{margin:40px;background:#fff;font-family:system-ui,sans-serif;color:#111}</style></head>
+<body>
+  <h1>Story of the day</h1>
+  <p>Article text so the page reads as editorial content around the image.</p>
+  <!-- A bare ad creative sized 480x270: NOT a standard IAB size and NOT squarish,
+       so the normal shape filter skips it (it looks like an editorial thumbnail).
+       No ad-context wrapper (id/class carry no ad hint, not an iframe). Aggressive
+       mode should still cover it because the model is confident it's an ad. -->
+  <div class="story-thumb">
+    <img id="thumb" src="ad1.png" width="480" height="270" alt="story thumbnail">
+  </div>
+  <p>More article text below to look like a normal content page.</p>
+</body>
+</html>

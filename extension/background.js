@@ -15,6 +15,7 @@ const DEFAULTS = {
   showConfidence: true,              // show the "ad NN%" tag on overlays
   collectOptIn: false,               // anonymous ad-snapshot contribution (opt-in)
   blockPopups: true,                 // popup guard: judge hijack-click popup tabs (full-page ad landings)
+  blockAggressive: false,            // aggressive mode: scan content areas too (catches native/hidden ads; more FPs)
   pausedUntil: 0,                    // epoch ms; blocking is suspended until then (0 = not paused)
   // Pre-wired ingest endpoint so opting in just works. Collection still requires
   // collectOptIn=true (per-user, off by default), so nothing sends until a user

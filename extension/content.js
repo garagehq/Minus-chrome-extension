@@ -44,6 +44,12 @@
   // Iter 24 (non-ad p>0.3 on only 8/499 bench images) supports lower gates.
   let CTX_BLOCK_P = 0.60;                  // element has ad context (iframe / ad-hint ancestor)
   let BARE_BLOCK_P = 0.88;                 // context-less element: require high confidence
+  // Aggressive mode (opt-in): block confident ads ANYWHERE — even outside ad slots
+  // and at non-standard/square shapes — to catch native/hidden ads the shape filter
+  // deliberately skips. 0.80 sits above the editorial-photo FP cluster (0.66–0.76)
+  // but below real ads (0.90+); it WILL false-positive on editorial photos the model
+  // rates ≥0.80, which is the accepted trade-off of this mode.
+  const AGGRESSIVE_BLOCK_P = 0.80;
   // A context-less element (bare <img>/<div>) is only ever blocked if it is a
   // near-standard IAB ad size. Editorial photos live at arbitrary sizes
   // (307×205, 371×482, 460×307) and were the dominant FP even at p=1.0; real
@@ -68,6 +74,7 @@
 
   let enabled = true;
   let blockVideo = true, blockDisplay = true; // per-type toggles (popup)
+  let aggressive = false;                  // aggressive mode: scan content areas too (opt-in)
   let collectOptIn = false;                // anonymous snapshot contribution
   // Block-action appearance (options page): flashcards in a chosen language,
   // or a minimal "blocked" card. Confidence tag is toggleable.
@@ -149,6 +156,7 @@
       collectOptIn = !!resp.settings.collectOptIn;
       blockVideo = resp.settings.blockVideo !== false;
       blockDisplay = resp.settings.blockDisplay !== false;
+      aggressive = resp.settings.blockAggressive === true;
       if (resp.settings.blockAction) blockAction = resp.settings.blockAction;
       if (resp.settings.blockLang) blockLang = resp.settings.blockLang;
       showConfidence = resp.settings.showConfidence !== false;
@@ -192,6 +200,15 @@
     }
     if ("blockVideo" in changes) blockVideo = changes.blockVideo.newValue !== false;
     if ("blockDisplay" in changes) blockDisplay = changes.blockDisplay.newValue !== false;
+    if ("blockAggressive" in changes) {
+      aggressive = changes.blockAggressive.newValue === true;
+      // Re-derive display coverage under the new rule: drop display overlays and
+      // their cached verdicts so every element re-classifies, then re-scan.
+      for (const [el, div] of overlays) { if (div.dataset.minusKind !== "video") { div.remove(); overlays.delete(el); } }
+      verdictCache.clear();
+      reportBlocked();
+      if (enabled && !document.hidden) scheduleScan(200);
+    }
     for (const [el, div] of overlays) {
       const kind = div.dataset.minusKind;
       if ((kind === "video" && !blockVideo) || (kind === "display" && !blockDisplay)) {
@@ -520,6 +537,7 @@
         let isAd;
         if (ctx) { isAd = r.p_ad >= CTX_BLOCK_P; }
         else if (isStandardAdSize(rc.width, rc.height) && !isSquarish(rc.width, rc.height)) { isAd = r.p_ad >= BARE_BLOCK_P; }
+        else if (aggressive) { isAd = r.p_ad >= AGGRESSIVE_BLOCK_P; }  // aggressive: trust the model outside ad slots too (native/hidden ads; more editorial-photo FPs)
         else { isAd = false; }  // editorial photos / product tiles — the model FPs here; shape is the only signal
         verdictCache.set(sig, isAd);
         if (verdictCache.size > 500) verdictCache.delete(verdictCache.keys().next().value);

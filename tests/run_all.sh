@@ -8,7 +8,7 @@ for t in test_device_loss_recovery test_gpu_death_spiral test_engine_recreate; d
   node tests/$t.mjs 2>&1 | grep -E "PASS|FAIL|green|failure|exception"
   sleep 4
 done
-for t in test_video_hysteresis test_edge_cases test_collection_optin; do
+for t in test_video_hysteresis test_edge_cases test_collection_optin test_aggressive_mode; do
   echo "===== $t"
   node tests/$t.mjs 2>&1 | grep -E "PASS|FAIL|green|failure|exception"
   sleep 4

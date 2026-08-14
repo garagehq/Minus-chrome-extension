@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Minus — vision ad blocker",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "description": "Blocks ads the way the minus device does — by looking at them. Ad elements are detected with a vision model and covered with language flashcards.",
   "permissions": [
     "activeTab",
