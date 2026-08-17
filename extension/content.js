@@ -91,6 +91,19 @@
   const sampleKeys = new WeakMap();        // element -> queued sample key (for retraction)
   const cropByEl = new WeakMap();          // element -> {img,p_ad,w,h} for a "not an ad" report (opt-in only)
   const verdictCache = new Map();          // signature -> is_ad
+  // Ad SLOTS churn on ad-dense pages (AdSense/Ezoic refresh the creative, swapping
+  // the iframe element every ~30-60s). The signature cache is keyed on the element
+  // (tag|src|WxH…), so a refreshed creative is a cache MISS and needs a full
+  // re-classify — and meanwhile trackOverlays tore the cover down because the old
+  // element detached. Net effect on churny pages: covers flicker off and re-cover
+  // can't keep up ("all ads still showing"). Fix: remember the SLOT by its document
+  // position+size; a new ad-context element occupying a known ad region is covered
+  // instantly, no re-classification.
+  const adRegions = new Map();             // document-coord slot key -> expiry ms
+  const REGION_AD_TTL_MS = 90000;
+  const regionKey = (r) => `${Math.round((r.left + (window.scrollX || 0)) / 8)}_${Math.round((r.top + (window.scrollY || 0)) / 8)}_${Math.round(r.width / 8)}_${Math.round(r.height / 8)}`;
+  const rememberAdRegion = (r) => { if (r.width >= MIN_W && r.height >= MIN_H) adRegions.set(regionKey(r), Date.now() + REGION_AD_TTL_MS); };
+  const isKnownAdRegion = (r) => { const k = regionKey(r), exp = adRegions.get(k); if (!exp) return false; if (Date.now() > exp) { adRegions.delete(k); return false; } return true; };
   const overlays = new Map();              // element -> overlay div
   const videoState = new Map();            // video element -> {adVotes, nonAdVotes, blocked, src, pausedSince} (Map, not WeakMap, so the sampler can prune stale-blocked overlays)
   const iframeState = new WeakMap();       // large cross-origin iframe -> {fp, adVotes, nonAdVotes, blocked, classified}
@@ -499,8 +512,15 @@
     scanning = true;
     try {
       const els = candidates().filter((el) => {
-        const sig = signature(el, el.getBoundingClientRect());
+        const rect = el.getBoundingClientRect();
+        const sig = signature(el, rect);
         if (verdictCache.get(sig) === true) { block(el, undefined, "display"); return false; }
+        // Refreshed creative in a KNOWN ad slot: cover instantly, skip the (slow)
+        // re-classify. Gated to ad-context (iframes / ad-slot divs) so a content
+        // element reflowing into a former ad region can't inherit the cover.
+        if (!verdictCache.has(sig) && isKnownAdRegion(rect) && hasAdContext(el)) {
+          rememberAdRegion(rect); block(el, undefined, "display"); return false;
+        }
         return !verdictCache.has(sig);
       }).slice(0, 12); // cap batch per scan
       if (!els.length) return;
@@ -542,6 +562,7 @@
         verdictCache.set(sig, isAd);
         if (verdictCache.size > 500) verdictCache.delete(verdictCache.keys().next().value);
         if (isAd) {
+          rememberAdRegion(rc);           // this document slot is an ad — re-cover its next creative instantly
           block(el, r.p_ad, "display");
           maybeQueueSample(el, crops[i], r);
         }
@@ -782,14 +803,31 @@
     reportBlocked();
   }
 
+  const ORPHAN_GRACE_MS = 1200;            // hold a refreshing ad's cover this long so it never flashes uncovered
   function positionOverlay(el, div) {
     const rect = el.getBoundingClientRect();
     if (rect.width < 4 || rect.height < 4 || !el.isConnected) {
+      const last = div._minusLastRect;
+      // If this was a real ad SLOT and the element just detached (the creative
+      // refreshed — AdSense/Ezoic swap the iframe every ~30-60s), HOLD the cover
+      // frozen at its last position for a grace window instead of dropping it, so
+      // the ad never flashes uncovered. A fast re-scan re-covers the new creative
+      // (region cache), and the stale cover is removed when the grace expires.
+      if (last && isKnownAdRegion(last)) {
+        if (!div._minusOrphanSince) { div._minusOrphanSince = performance.now(); if (enabled && !document.hidden && IS_TOP) scheduleScan(120); }
+        if (performance.now() - div._minusOrphanSince < ORPHAN_GRACE_MS) {
+          Object.assign(div.style, { top: `${last.top}px`, left: `${last.left}px`, width: `${last.width}px`, height: `${last.height}px` });
+          return; // hold the cover
+        }
+      }
       div.remove();
       overlays.delete(el);
       reportBlocked();
+      if (!el.isConnected && enabled && !document.hidden && IS_TOP) scheduleScan(200);
       return;
     }
+    div._minusOrphanSince = 0;
+    div._minusLastRect = { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
     Object.assign(div.style, {
       top: `${rect.top}px`, left: `${rect.left}px`,
       width: `${rect.width}px`, height: `${rect.height}px`,
@@ -814,8 +852,10 @@
     if (checkOcclusion) lastOcclusionCheck = now;
     for (const [el, div] of overlays) {
       positionOverlay(el, div);
-      // positionOverlay may have removed a detached overlay mid-iteration.
-      if (checkOcclusion && overlays.has(el)) updateOcclusion(el, div);
+      // positionOverlay may have removed a detached overlay mid-iteration; and a
+      // held orphan's element is detached, so elementFromPoint occlusion checks
+      // are meaningless for it — skip them.
+      if (checkOcclusion && overlays.has(el) && !div._minusOrphanSince) updateOcclusion(el, div);
     }
     requestAnimationFrame(trackOverlays);
   }

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>ad-refresh flicker fixture</title>
+<style>body{margin:40px;background:#fff;font-family:system-ui,sans-serif}</style></head>
+<body>
+  <h1>Article about the beach</h1>
+  <p>Some editorial text so the page reads like real content.</p>
+  <!-- An ad SLOT (ad-context container) holding a creative. A stable slot whose
+       inner creative element is swapped == exactly what AdSense/Ezoic do on refresh. -->
+  <div id="slot" class="ad-container" style="position:absolute; top:120px; left:120px; width:300px; height:250px;">
+    <img id="creative" src="ad1.png" width="300" height="250" alt="ad">
+  </div>
+  <p style="margin-top:420px">More article text below.</p>
+  <script>
+    // Simulate an ad refresh: detach the old creative element, insert a brand-new
+    // one at the SAME slot position (a new DOM element == a signature-cache miss).
+    window.__swaps = 0;
+    window.swapRefresh = () => {
+      const slot = document.getElementById('slot');
+      slot.textContent = '';                 // detach the old <img>
+      const img = document.createElement('img');
+      img.src = 'ad1.png?v=' + (++window.__swaps); // new element + new src
+      img.width = 300; img.height = 250; img.id = 'creative'; img.alt = 'ad';
+      slot.appendChild(img);
+    };
+  </script>
+</body>
+</html>
