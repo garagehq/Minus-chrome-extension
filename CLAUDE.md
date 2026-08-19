@@ -1,9 +1,140 @@
+# Pipeline Context (AGENTS.md)
+
+# AGENTS.md — Pipeline Context for Minus-chrome-extension
+
+## Pipeline History
+- *2026-08-19* — Implement: Here'\''\'\'''\''s a summary of what was done:
+
+## Accomplished Changes
+
+### 1. Fixed missing `extension/models/
+
+
+---
+
+# Pipeline Context (AGENTS.md)
+
+# AGENTS.md — Pipeline Context for Minus-chrome-extension
+
+## Project Overview
+A Chrome extension that uses a local vision-language model to detect and block ads by covering them with language flashcards.
+
+**Repository**: `garagehq/Minus-chrome-extension`
+**Language**: javascript
+**Framework**: none
+**Subtype**: javascript
+**Docker Image**: `node:20-slim` — use this for all testing
+
+## Build & Run
+- **Install deps**: `cd /workspace/repo && npm ci 2>&1 | tail -5 || npm install 2>&1 | tail -5 || true`
+
+## Testing
+- **Has existing tests**: yes
+- **Test directory**: `tests/`
+- **Test framework**: none
+- **Test command**: `node tests/test_extension_hardening.mjs`
+- **Pipeline test runner**: `jest`
+- **Testable components** (partial scope): engine-lib, models_catalog, content.js logic, test fixtures
+
+## File Structure
+**Source files:**
+- `src/engine-lib.js`
+- `extension/offscreen.js`
+- `extension/options.js`
+- `extension/review.js`
+- `extension/models_catalog.js`
+- `extension/welcome.js`
+- `extension/popup.js`
+- `extension/content.js`
+- `extension/background.js`
+- `extension/spanish.js`
+- `extension/learn.js`
+**Test files:**
+- `tests/test_extension_hardening.mjs`
+- `tests/merge_pool.mjs`
+- `tests/test_iframe_video.mjs`
+- `tests/fixtures/shadow.html`
+- `tests/fixtures/refreshad.html`
+- `tests/fixtures/article.html`
+- `tests/fixtures/aggressive.html`
+- `tests/fixtures/video_remote.html`
+- `tests/fixtures/blink_inner.html`
+- `tests/fixtures/ad_landing.html`
+**Config/Build files (DO NOT MODIFY):**
+- `package.json`
+- `server/package.json`
+- `server/Dockerfile`
+
+## Key Source Code
+Snippets from main source files (first 40 lines each):
+```
+
+--- src/engine-lib.js ---
+// Single bundling entry for everything the Minus inference engine needs from
+// transformers.js. esbuild resolves the externalized onnxruntime-web imports;
+// the ORT wasm/mjs runtime assets are copied next to the bundle by build.mjs
+// and located at runtime via env.backends.onnx.wasm.wasmPaths.
+export {
+  AutoModelForImageTextToText,
+  AutoProcessor,
+  AutoTokenizer,
+  RawImage,
+  Tensor,
+  env,
+} from "@huggingface/transformers";
+
+// Raw ONNX Runtime for the SigLIP2 engine (single-graph classifier —
+// no transformers.js model class needed). Default bundle = webgpu + wasm
+// (the two EPs validated on this project'\''\'\'''\''\'\''\'\'''\'''\''\'\'''\''s hardware). To enable the WebGL
+// fallback for non-WebGPU machines, rebuild against "onnxruntime-web/all" —
+// the SigLIP2 loader'\''\'\'''\''\'\''\'\'''\'''\''\'\'''\''s EP chain already tries webgl when the runtime exposes
+// it (see offscreen.js loadSiglip2Engine).
+export * as ort from "onnxruntime-web/webgpu";
+
+--- extension/offscreen.js ---
+// Minus inference engine — runs INSIDE the browser in an MV3 offscreen
+// document (window context: WebGPU + canvas available, survives while the
+// service worker sleeps).
+//
+// Engine: LFM2.5-VL (our Iter 14 fine-tune when packaged under models/,
+// otherwise the stock ONNX from the HF hub) via transformers.js, WebGPU with
+// WASM fallback. Verdict = logit decode: softmax over Yes/No token logits at
+// the first generated position — the same decoder the training campaign used.
+
+import { AutoModelForImageTextToText, AutoProcessor, RawImage, env, ort } from "./dist/engine-lib.js";
+import { FALLBACK_CATALOG, parseCatalog, resolveModel, modelEnvFlags } from "./models_catalog.js";
+
+env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL("dist/");
+ort.env.wasm.wasmPaths = chrome.runtime.getURL("dist/");
+
+// Quiet the engine'\''\'\'''\''\'\''\'\'''\'''\''\'\'''\''s startup noise. Models are packaged (chrome-extension://),
+// so the browser Cache API can'\''\'\'''\''\'\''\'\'''\'''\''\'\'''\''t cache them anyway — disabling it removes the
+// "Failed to execute '\''\'\'''\''\'\''\'\'''\'''\''\'\'''\''put'\''\'\'''\''\'\''\'\'''\'''\''\'\'''\'' on '\''\'\'''\''\'\''\'\'''\'''\''\'\'''\''Cache'\''\'\'''\''\'\''\'\'''\'''\''\'\'''\''" throw. logLevel trims OR
+```
+
+## CI Gotchas
+(none yet — will be populated if CI fails)
+
+## Pipeline History
+- *2026-08-19* — Scout: javascript/none, scope=partial
+
+## Known Issues
+(none yet)
+
+## Notes
+- This file is auto-read by Qwen Code as project context (like CLAUDE.md)
+- Updated by each pipeline phase with learnings, CI fixes, and gotchas
+- DO NOT delete this file — it helps the pipeline avoid repeating mistakes
+
+
+---
+
 # Minus Chrome extension — agent orientation
 
 MV3 extension that detects ads with an **in-browser vision model** (LFM2.5-VL via
 transformers.js/ONNX on WebGPU) and covers them with Spanish flashcards. Sibling
 of the `minus` HDMI device; models are trained in `/home/ubuntu/training`
-(see that repo's `docs/iteration-log.md` for the full model campaign).
+(see that repo'\''\'\'''\''s `docs/iteration-log.md` for the full model campaign).
 
 ## Layout
 
@@ -20,7 +151,7 @@ of the `minus` HDMI device; models are trained in `/home/ubuntu/training`
 | `extension/learn.js` | Spaced-repetition core (dependency-free, dual browser-global + CJS export): SM-2-lite scheduler, per-day new-card pacing, stats, `chrome.storage.local` load/save under `minusLearn`. Shared by review/popup/options |
 | `extension/review.html/js` | Full-page flashcard **Review** (opened from popup/options): due + paced-new queue, Show→Again/Good/Easy grading (`space`/`1`/`2`/`3`), progress strip, language filter |
 | `tests/` | Fast regression (`npm test`, no GPU) + GPU-backed suites (soak, functional) via `tests/harness.mjs` |
-| `package.mjs` | Release zip: extension contents at archive ROOT, default engine's weights only (~400 MB) |
+| `package.mjs` | Release zip: extension contents at archive ROOT, default engine'\''\'\'''\''s weights only (~400 MB) |
 
 ## Decision tiering (content.js) — the precision architecture
 
@@ -32,11 +163,11 @@ of the `minus` HDMI device; models are trained in `/home/ubuntu/training`
 
 `CTX_BLOCK_P`/`BARE_BLOCK_P` default 0.60/0.88 but are **per-engine**: catalog
 entries may carry `thresholds: {ctx, bare}` (background resolves the active
-engine's entry and sends it with `minus:settings`). Iter 27b (default) ships 0.60/0.88; the Iter 24 era ran 0.35/0.75 —
+engine'\''\'\'''\''s entry and sends it with `minus:settings`). Iter 27b (default) ships 0.60/0.88; the Iter 24 era ran 0.35/0.75 —
 justified by benchmark separation, validated by a live A/B (+33 % coverage,
 precision held). New models should ship their own operating point; pick it from
 the PR-curve on `training/data/web_ad_bench` scores, never inherit 0.5 or a
-predecessor's gates (see training repo `docs/iter24-strategy.md`).
+predecessor'\''\'\'''\''s gates (see training repo `docs/iter24-strategy.md`).
 
 **Capture pipeline nuance:** anonymous-snapshot crops record *model verdicts*,
 which is NOT the same as user-visible overlays — structural gates suppress many
@@ -61,7 +192,7 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
 ## Hard-won gotchas (do not relearn these)
 
 - **Only the ACTIVE tab may scan.** `chrome.tabs.captureVisibleTab(windowId)`
-  ALWAYS returns the *active* tab's pixels — a background/other tab that captured
+  ALWAYS returns the *active* tab'\''\'\'''\''s pixels — a background/other tab that captured
   would crop its own element coordinates against the wrong image (mis-scaled
   overlays + phantom false-positives: the multi-tab scaling bug). The background
   refuses `minus:capture` AND `minus:classify` from any sender whose
@@ -93,7 +224,7 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
   is still live — otherwise it adopts the freshly-rebuilt one, so batch B never
   disposes the engine batch A just built. `askOffscreen` is timeout-bounded (a
   WebGPU classify can hang without throwing, which would otherwise never settle).
-- **Turning blocking OFF must actually tear down.** content.js's
+- **Turning blocking OFF must actually tear down.** content.js'\''\'\'''\''s
   `storage.onChanged` handles `enabled`/`disabledSites` (not just the ad-type
   toggles): it re-derives whether this tab is on via `minus:settings` and, when
   off, removes every overlay + stops scanning; back on, it re-scans. `start()` is
@@ -108,7 +239,7 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
   synchronous throw on context invalidation (extension update/reload) and shuts
   the content script down instead of spamming failed captures every 2.5 s.
 - **Overlays are accessibility-clean.** The flashcard text is `aria-hidden` (a
-  screen reader shouldn't read random foreign vocab over every ad); the ✕ reveal
+  screen reader shouldn'\''\'\'''\''t read random foreign vocab over every ad); the ✕ reveal
   button carries an `aria-label` and is shown on keyboard focus (`:focus-within`/
   `:focus-visible`), not hover-only; deck strings are set via `textContent`.
 - **Playwright evaluates on MV3 contexts HANG, not reject.** Chrome idle-kills
@@ -118,10 +249,10 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
   timeout; long site loops need a per-site watchdog that force-closes the page
   (see `tests/harness.mjs waitForEngine` + `tests/iteration_soak.mjs`). This
   froze four consecutive soaks before being fixed everywhere.
-- **`chrome.runtime.sendMessage` never delivers to the sender's own context** —
-  a SW can't message itself; test message handlers from a popup/extension page.
+- **`chrome.runtime.sendMessage` never delivers to the sender'\''\'\'''\''s own context** —
+  a SW can'\''\'\'''\''t message itself; test message handlers from a popup/extension page.
 - **Tegra/Dawn WebGPU flakes on cold launch** (~50 %): browser-level adapter can
-  pass while the offscreen document's fails. Retry the whole launch (the soak
+  pass while the offscreen document'\''\'\'''\''s fails. Retry the whole launch (the soak
   self-heals ×3). Headless WebGPU needs `--enable-unsafe-webgpu
   --ignore-gpu-blocklist --use-angle=vulkan --enable-features=Vulkan
   --disable-vulkan-surface` and the full chromium build, not headless shell.
@@ -133,7 +264,7 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
   detects that class and rebuilds the engine on a fresh device (retrying on the
   dead one is futile). Tests: `test_gpu_recovery_unit` (pure, in `npm test`) +
   `test_device_loss_recovery` (WebGPU integration — needs a FREE GPU, so it
-  can't run while training saturates the Tegra).
+  can'\''\'\'''\''t run while training saturates the Tegra).
 - **Clean captures must be TARGETED and covered frames peek on BACKOFF, not a
   timer.** `captureClean(rects)` hides only cards over the regions being read
   (hiding all cards = every overlay blinking every ~2.5s — the wco.tv report).
@@ -150,25 +281,25 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
   `ad-interrupting` CLASSES that match `AD_HINT`, so the display scanner treated
   the whole player as a display ad. `candidates()` now excludes `<video>` and any
   container holding a player-sized `<video>`.
-  (2) *Dark-content direct-read FP* — a music video's dark opening read directly
+  (2) *Dark-content direct-read FP* — a music video'\''\'\'''\''s dark opening read directly
   as a "confident ad" and held a cover. A direct frame below `BLACK_LUMA`(12)/
   `MIN_CROP_STDDEV`(11) is `unreadable` → not a confident ad.
   (3) *Vevo/DRM letterbox screenshot FP* — a hardware-overlay video is CORS-tainted
   for a direct read AND renders as a dark letterbox in `captureVisibleTab`; that
   letterbox scored as an ad and stuck forever. The tainted-screenshot path uses an
   AGGRESSIVE `unreadable` bar (`SHOT_DARK_LUMA`46/`SHOT_MIN_STD`22) — two-tier
-  because a trusted direct read deserves a tight bar but a letterbox we can't
+  because a trusted direct read deserves a tight bar but a letterbox we can'\''\'\'''\''t
   actually see must never hold a cover.
   (4) *Paused pre-roll never got a non-ad vote* — the old sampler skipped paused
   videos, so a finished pre-roll that paused stayed covered. `sampleVideos` now
   clears a blocked video the moment it ends / swaps src / scrolls off / sits paused
   >3 s, and keeps re-verifying blocked-but-paused videos.
   **Inherent limit:** genuinely DRM/hardware-overlay video (tainted + black in tab
-  captures) can't be read at all, so its pre-rolls can't be covered — the guard's
+  captures) can'\''\'\'''\''t be read at all, so its pre-rolls can'\''\'\'''\''t be covered — the guard'\''\'\'''\''s
   job is only to ensure we never FP-cover its *content* instead.
 - **Testing real YouTube (`tests/e2e_youtube.mjs`): ad delivery is
   non-deterministic and the `.ytp-ad-*`/`.ad-showing` selectors are UNRELIABLE**
-  (they stay `true` during pure content — observed 76 s straight). Don't gate on
+  (they stay `true` during pure content — observed 76 s straight). Don'\''\'\'''\''t gate on
   them. YouTube frames ARE directly readable here, so the model re-reads content
   every tick and self-clears; the harness therefore skip-spams and waits a 140 s
   window (longer than any real YT ad break) before calling a still-covered player
@@ -176,24 +307,24 @@ have `manifest.json` at its ROOT (no wrapper dir) and only the default engine.
   live sampler read for one-off diagnosis (uses a debug DOM attr not present in
   ship builds). 20-video confirm: covered=4, recovered=4, stuck=0.
 - **Popup/popunder ad tabs are invisible to element covering** (the aggressive
-  reader-site report): the whole page IS the ad, and every element on it is that site's own
+  reader-site report): the whole page IS the ad, and every element on it is that site'\''\'\'''\''s own
   first-party content. The popup guard works at the TAB level instead —
-  content.js reports clicks that didn't ride an `<a href>` (popunder scripts
+  content.js reports clicks that didn'\''\'\'''\''t ride an `<a href>` (popunder scripts
   hijack clicks on arbitrary page areas; real `target=_blank` links never
   enter the pipeline), background marks tabs spawned by that opener within 3 s
   as suspects, and once a suspect is active + loaded + cross-eTLD+1 from its
   opener it captures the viewport and classifies the PAGE (gate 0.85) → the
-  tab's content script shows a full-page Close-tab/Show-page cover. Same-domain
+  tab'\''\'\'''\''s content script shows a full-page Close-tab/Show-page cover. Same-domain
   spawns are exempt (the popunder "re-open the reader" trick). Never auto-close.
   Deterministic fixtures: `popup_opener.html` (localhost) → `ad_landing.html`
   (127.0.0.1, cross-"domain") + `article.html` negative control
   (`tests/e2e_popup_guard.mjs`). Live probe: `tests/probe_popups.mjs [url]`.
-- **`pkill -f <pattern>` can match the invoking shell's own command line** and
+- **`pkill -f <pattern>` can match the invoking shell'\''\'\'''\''s own command line** and
   SIGTERM your session (exit 144). Kill by exact PID or `pkill -x chrome`.
 - Chrome caches the MV3 SW script in the profile — the harness scrubs
   `Default/Service Worker` per launch or you run STALE background.js.
 - Windows logs a `powerPreference`-ignored warning from INSIDE
-  `requestAdapter()`; console filters can't catch it — offscreen.js strips the
+  `requestAdapter()`; console filters can'\''\'\'''\''t catch it — offscreen.js strips the
   option at the `navigator.gpu.requestAdapter` choke point (Windows only).
 - The engine needs ~1–2 GB; `device_map`-style multi-engine dirs in `models/`
   are dev-only — `package.mjs` excludes all but the default.

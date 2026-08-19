@@ -179,7 +179,9 @@ $("resetLearn").addEventListener("click", async () => {
   clearTimeout(resetArmTimer);
   btn.classList.remove("armed");
   btn.textContent = "Reset progress";
-  await chrome.storage.local.set({ [MINUS_LEARN_KEY]: { v: 1, cards: {} } });
+  const store = await minusLearnLoad();
+  minusLearnReset(store);
+  await minusLearnSave(store);
   await refreshLearnStats();
   savedFlash("learning progress reset");
 });

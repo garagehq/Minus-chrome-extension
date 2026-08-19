@@ -48,7 +48,15 @@ export function buildIndex(modelsDir, prev) {
 // CLI entry — skipped when imported (build.mjs / tests).
 if (process.argv[1] && process.argv[1].endsWith("build_model_index.mjs")) {
   const prev = existsSync(INDEX) ? JSON.parse(readFileSync(INDEX, "utf8")) : FALLBACK_CATALOG;
-  const index = buildIndex(MODELS_DIR, prev);
+  const scanned = scanModels(MODELS_DIR);
+  let index;
+  if (scanned.length === 0) {
+    // No model dirs on disk (dev box / test sandbox): use the fallback
+    // catalog directly so tests and the popup still work without models/.
+    index = parseCatalog(prev);
+  } else {
+    index = buildIndex(MODELS_DIR, prev);
+  }
   writeFileSync(INDEX, JSON.stringify(index, null, 2) + "\n");
   console.log(`wrote ${INDEX}\n  ${index.models.length} models: ${index.models.map((m) => `${m.key}→${m.dir}`).join(", ")}\n  default: ${index.default}`);
 }

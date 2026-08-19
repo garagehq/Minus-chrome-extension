@@ -99,11 +99,20 @@ function minusGrade(store, card, grade, now) {
   return store;
 }
 
+// Reset all learning progress: wipe cards + per-day counter, keep the store
+// skeleton intact (version number, empty cards object). Mutates store in-place.
+function minusLearnReset(store) {
+  store.cards = {};
+  store.newToday = { date: minusTodayStr(Date.now()), count: 0 };
+  return store;
+}
+
 // Node/CommonJS export for unit tests (ignored in the browser).
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     MINUS_LEARN_KEY, MINUS_NEW_PER_DAY, MINUS_MATURE_IVL, MINUS_DAY,
     minusSchedule, minusLearnStats, minusBuildQueue, minusGrade,
+    minusLearnReset,
     minusIsNew, minusIsLearned, minusIsDue, minusNewAllowed, minusLearnKey,
   };
 }

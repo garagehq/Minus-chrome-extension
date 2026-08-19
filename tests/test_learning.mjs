@@ -81,6 +81,20 @@ const DAY = L.MINUS_DAY;
   ok("grading a NEW card bumps today's new counter", store.newToday && store.newToday.count === 1);
 }
 
+// ---------------- minusLearnReset wipes cards, preserves skeleton ----------
+{
+  const store = { v: 2, cards: { "es::a": { l: "es", w: "a", reps: 3, ivl: 10 }, "fr::b": { l: "fr", w: "b", reps: 1, ivl: 2 } } };
+  const before = JSON.parse(JSON.stringify(store));
+  L.minusLearnReset(store);
+  ok("reset clears all cards", Object.keys(store.cards).length === 0);
+  ok("reset resets newToday counter to 0", store.newToday && store.newToday.count === 0);
+  ok("reset preserves store version", store.v === before.v);
+  ok("reset returns the store for chaining", store === L.minusLearnReset(store));
+  ok("fresh queue after reset is empty", L.minusBuildQueue(store, NOW, "all").length === 0);
+  const s = L.minusLearnStats(store, NOW, "all");
+  ok("stats after reset: all zeroes", s.seen === 0 && s.learning === 0 && s.learned === 0 && s.dueNow === 0 && s.news === 0);
+}
+
 // ---------------- Greek deck ----------------
 {
   const el = JSON.parse(read("decks/el.json"));
