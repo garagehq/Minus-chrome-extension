@@ -109,8 +109,22 @@ const MINUS_DECKS = {
     { w: "διαλέγω", en: "to choose", ex: "Εσύ διαλέγεις τι βλέπεις." },
     { w: "ευχαριστώ", en: "thank you", ex: "Ευχαριστώ για τη βοήθειά σου." },
   ],
+  uk: [
+    { w: "реклама", en: "the advertisement", ex: "Ця реклама більше не заважає." },
+    { w: "вчитися", en: "to learn", ex: "Я вчуся щодня." },
+    { w: "екран", en: "the screen", ex: "Екран тепер чистий." },
+    { w: "час", en: "the time", ex: "У мене є час." },
+    { w: "замість", en: "instead of", ex: "Слово замість реклами." },
+    { w: "купувати", en: "to buy", ex: "Тобі не треба нічого купувати." },
+    { w: "безкоштовно", en: "free (of charge)", ex: "Цей урок можна пройти безкоштовно." },
+    { w: "вікно", en: "the window", ex: "Відкрий вікно, будь ласка." },
+    { w: "свобода", en: "freedom", ex: "Свобода від реклами — це приємно." },
+    { w: "слово", en: "the word", ex: "Ось нове слово для тебе." },
+    { w: "обирати", en: "to choose", ex: "Ти обираєш, що бачити." },
+    { w: "дякую", en: "thank you", ex: "Дякую за допомогу!" },
+  ],
 };
-const MINUS_LANGS = { es: "Spanish", fr: "French", de: "German", it: "Italian", pt: "Portuguese", ja: "Japanese", el: "Greek" };
+const MINUS_LANGS = { es: "Spanish", fr: "French", de: "German", it: "Italian", pt: "Portuguese", ja: "Japanese", el: "Greek", uk: "Ukrainian" };
 // Back-compat alias (content.js historically read MINUS_SPANISH).
 const MINUS_SPANISH = MINUS_DECKS.es;
 

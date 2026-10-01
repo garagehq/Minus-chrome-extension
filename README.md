@@ -165,7 +165,7 @@ A full-page superset of the popup, plus settings that only live here:
 
 - **Block action** — what appears over a blocked ad:
   - **Language flashcards** (default) in **Spanish, French, German, Italian,
-    Portuguese, Japanese, or Greek** — a **500-word deck per language**
+    Portuguese, Japanese, Greek, or Ukrainian** — a **500-word deck per language**
     (`decks/*.json`), every blocked ad becomes a vocabulary card (word →
     translation → example sentence), with a live preview.
   - **Minimal** — a quiet dark card that just says the ad was blocked.
